@@ -100,7 +100,7 @@ exit() # Still keeping the exit() as per user denial
 import pickle
 # 生成されたSMILESリストをpickleファイルに保存
 with open('mols.pkl', 'wb') as f: # Changed extension to .pkl for clarity
-  pickle.dump(all_smiles_results , f)
+    pickle.dump(all_smiles_results , f)
 
 
 # # --- Debugging/Testing Section (Commented out) ---

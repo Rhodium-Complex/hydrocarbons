@@ -3,6 +3,36 @@ import itertools
 import numpy as np
 from typing import Generator
 
+try:
+    from hydrocarbon_rust import has_permutation_match as _rust_has_permutation_match
+except ImportError:
+    _rust_has_permutation_match = None
+
+
+def _permuted_matrix_key(bonds: np.ndarray, permutation: tuple) -> tuple:
+    permuted_bonds = np.take(np.take(bonds, permutation, axis=0), permutation, axis=1)
+    return (len(permutation), permuted_bonds.tobytes())
+
+
+def _flatten_permutation(permutation_groups: tuple) -> tuple:
+    return tuple(itertools.chain.from_iterable(permutation_groups))
+
+
+def _has_permutation_match(bonds: np.ndarray, bond_fingerprints: list, permutation_groups: tuple, record_keys: set) -> bool:
+    num_atoms = len(bonds)
+    full_record_keys = [key for key_size, key in record_keys if key_size == num_atoms]
+    if not full_record_keys:
+        return False
+
+    if _rust_has_permutation_match is not None:
+        return _rust_has_permutation_match(bonds.tobytes(), num_atoms, bond_fingerprints, full_record_keys)
+
+    for permutation_group in itertools.product(*permutation_groups):
+        permutation = _flatten_permutation(permutation_group)
+        if _permuted_matrix_key(bonds, permutation) in record_keys:
+            return True
+    return False
+
 def unique_mols(molecule_matrix: list) -> Generator[molecule.Molecule, None, None]:
     """
     分子のリストから一意な分子構造のみを抽出します。
@@ -20,23 +50,27 @@ def unique_mols(molecule_matrix: list) -> Generator[molecule.Molecule, None, Non
     unique_molecule_records = {}
     for molecule_obj  in molecule_matrix:
         molecule_fingerprint = molecule_obj .fingerprint
+        bonds_for_keys = np.ascontiguousarray(molecule_obj .bonds, dtype=np.uint8)
         bond_fingerprints = graph_utils.morgan(molecule_obj .bonds)
         bond_fingerprints = [list(np.where(bond_fingerprints == i)[0]) for i in np.unique(bond_fingerprints)[::-1]]
+        permutation_groups = tuple(tuple(itertools.permutations(group)) for group in bond_fingerprints)
         
-        for bond_fingerprint_group in bond_fingerprints:
-            for permutation in itertools.permutations(bond_fingerprint_group):
+        for group_permutations in permutation_groups:
+            for permutation in group_permutations:
                 canonical_permutation = tuple(permutation)
+                canonical_key = _permuted_matrix_key(bonds_for_keys, canonical_permutation)
                 if molecule_fingerprint not in unique_molecule_records:
-                    unique_molecule_records[molecule_fingerprint] = [molecule_obj .bonds[:,canonical_permutation][canonical_permutation,:]]
+                    unique_molecule_records[molecule_fingerprint] = {canonical_key}
                     yield molecule_obj 
                     continue
                 
-                for i in itertools.product(*[ itertools.permutations(j) for j in bond_fingerprints]):
-                    i = sum(i,())
-                    current_bond_structure = molecule_obj .bonds[:,i][i,:]
-                    if any(np.array_equal(current_bond_structure, j) for j in unique_molecule_records[molecule_fingerprint]): break
-                else:
-                    unique_molecule_records[molecule_fingerprint].append(molecule_obj .bonds[:,canonical_permutation][canonical_permutation,:])
+                if not _has_permutation_match(
+                    bonds_for_keys,
+                    bond_fingerprints,
+                    permutation_groups,
+                    unique_molecule_records[molecule_fingerprint],
+                ):
+                    unique_molecule_records[molecule_fingerprint].add(canonical_key)
                     yield molecule_obj 
     del unique_molecule_records
 

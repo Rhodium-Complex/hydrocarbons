@@ -1,5 +1,6 @@
 output.png
 .vscode/settings.json
+.venv/
 __pycache__/test_drawing.cpython-311-pytest-7.4.0.pyc
 __pycache__/
 target/

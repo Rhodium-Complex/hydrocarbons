@@ -1,7 +1,7 @@
 import graph_utils,molecule
 import itertools
 import numpy as np
-from typing import Generator
+from typing import Generator, Iterable
 
 try:
     from hydrocarbon_rust import has_permutation_match as _rust_has_permutation_match
@@ -53,17 +53,16 @@ def _has_permutation_match_python(matrix_bytes: bytes, num_atoms: int, permutati
 
 def _has_permutation_match(bonds: np.ndarray, bond_fingerprints: list, permutation_groups: tuple, record_keys: set) -> bool:
     num_atoms = len(bonds)
-    full_record_keys = tuple(key for key_size, key in record_keys if key_size == num_atoms)
-    if not full_record_keys:
+    if not record_keys:
         return False
 
     matrix_bytes = bonds.tobytes()
     if _rust_has_permutation_match is not None:
-        return _rust_has_permutation_match(matrix_bytes, num_atoms, bond_fingerprints, full_record_keys)
+        return _rust_has_permutation_match(matrix_bytes, num_atoms, bond_fingerprints, tuple(record_keys))
 
-    return _has_permutation_match_python(matrix_bytes, num_atoms, permutation_groups, full_record_keys)
+    return _has_permutation_match_python(matrix_bytes, num_atoms, permutation_groups, tuple(record_keys))
 
-def unique_mols(molecule_matrix: list) -> Generator[molecule.Molecule, None, None]:
+def unique_mols(molecule_matrix: Iterable[molecule.Molecule]) -> Generator[molecule.Molecule, None, None]:
     """
     分子のリストから一意な分子構造のみを抽出します。
     
@@ -78,30 +77,38 @@ def unique_mols(molecule_matrix: list) -> Generator[molecule.Molecule, None, Non
         一意な分子構造
     """
     unique_molecule_records = {}
+    seen_labeled_molecules = set()
     for molecule_obj  in molecule_matrix:
         molecule_fingerprint = molecule_obj .fingerprint
         bonds_for_keys = np.ascontiguousarray(molecule_obj .bonds, dtype=np.uint8)
+        labeled_key = (len(molecule_obj), bonds_for_keys.tobytes())
+        if labeled_key in seen_labeled_molecules:
+            continue
+        seen_labeled_molecules.add(labeled_key)
+
         bond_fingerprints = graph_utils.morgan(molecule_obj .bonds)
         bond_fingerprints = [list(np.where(bond_fingerprints == i)[0]) for i in np.unique(bond_fingerprints)[::-1]]
-        permutation_groups = tuple(tuple(itertools.permutations(group)) for group in bond_fingerprints)
+        canonical_permutation = tuple(itertools.chain.from_iterable(bond_fingerprints))
         
-        for group_permutations in permutation_groups:
-            for permutation in group_permutations:
-                canonical_permutation = tuple(permutation)
-                canonical_key = _permuted_matrix_key(bonds_for_keys, canonical_permutation)
-                if molecule_fingerprint not in unique_molecule_records:
-                    unique_molecule_records[molecule_fingerprint] = {canonical_key}
-                    yield molecule_obj 
-                    continue
-                
-                if not _has_permutation_match(
-                    bonds_for_keys,
-                    bond_fingerprints,
-                    permutation_groups,
-                    unique_molecule_records[molecule_fingerprint],
-                ):
-                    unique_molecule_records[molecule_fingerprint].add(canonical_key)
-                    yield molecule_obj 
+        if molecule_fingerprint not in unique_molecule_records:
+            canonical_key = _permuted_matrix_key(bonds_for_keys, canonical_permutation)[1]
+            unique_molecule_records[molecule_fingerprint] = {len(molecule_obj): {canonical_key}}
+            yield molecule_obj
+            continue
+
+        record_keys = unique_molecule_records[molecule_fingerprint].setdefault(len(molecule_obj), set())
+        permutation_groups = tuple(tuple(itertools.permutations(group)) for group in bond_fingerprints)
+        if _has_permutation_match(
+            bonds_for_keys,
+            bond_fingerprints,
+            permutation_groups,
+            record_keys,
+        ):
+            continue
+
+        canonical_key = _permuted_matrix_key(bonds_for_keys, canonical_permutation)[1]
+        record_keys.add(canonical_key)
+        yield molecule_obj
     del unique_molecule_records
 
 def unique_dehydro_mols(dehydro_stream)-> list:
@@ -118,16 +125,17 @@ def unique_dehydro_mols(dehydro_stream)-> list:
     
     def dehydrogenase(mol):
         MAX_BOND_ORDER = 3
+        bond_orders = np.sum(mol.bonds, axis=1)
         
         # 結合次数の増加（脱水素化）を試みる
         # 化学的には2つの原子間の結合電子対が増えることを表現
         for i in range(len(mol)):
             # 原子iの結合の合計が最大結合次数を超える場合はスキップ
-            if sum(mol.bonds[i]) > MAX_BOND_ORDER: continue
+            if bond_orders[i] > MAX_BOND_ORDER: continue
             for j in range(i + 1, len(mol)):
                 if mol.bonds[i][j] == 0: continue
                 if mol.bonds[i][j] == MAX_BOND_ORDER: continue
-                if sum(mol.bonds[j]) > MAX_BOND_ORDER: continue
+                if bond_orders[j] > MAX_BOND_ORDER: continue
                 
                 tmp = mol.bonds.copy()
                 tmp[i][j] +=1

@@ -1,4 +1,3 @@
-from openbabel import pybel
 from concurrent.futures import ProcessPoolExecutor
 import structure_generator, molecule_transformations, converter
 import itertools
@@ -94,58 +93,69 @@ if __name__ == '__main__':
 #9 :...35 ...338 ...1902 ...7244 ...19983 ...40139 ...57771 ...56437 ...33860 ...10064 ...832
 #10 :...75 ...852 ...5568 ...24938 ...81909 ...201578 ..369067 ..488125 ..439373 ..241297 ..64352 .
 
-# 作成中のため強制終了
-exit() # Still keeping the exit() as per user denial
-
-import pickle
-# 生成されたSMILESリストをpickleファイルに保存
-with open('mols.pkl', 'wb') as f: # Changed extension to .pkl for clarity
-    pickle.dump(all_smiles_results , f)
 
 
-# # --- Debugging/Testing Section (Commented out) ---
-# # This section appears to be for debugging specific indices or testing modifications.
-# # It's commented out for regular execution.
-# print(all_smiles_results[27073])
-# all_smiles_results[27073] = "CC" # Example modification
-# print(all_smiles_results[27297])
-# all_smiles_results[27297] = "CC" # Example modification
-# print(all_smiles_results[31837])
-# all_smiles_results[31837] = "CC" # Example modification
-# print(all_smiles_results[31995])
-# all_smiles_results[31995] = "CC" # Example modification
-# # --- End Debugging/Testing Section ---
+def second():
+    """この関数は、生成されたSMILES文字列のリストを処理し、SVGファイルを生成するためのコードを含んでいます。"""
+    # 作成中のため強制終了
+    exit() # Still keeping the exit() as per user denial
+    all_smiles_results = {}
+    import pickle
+    # 生成されたSMILESリストをpickleファイルに保存
+    with open('mols.pkl', 'wb') as f: # Changed extension to .pkl for clarity
+        pickle.dump(all_smiles_results , f)
 
 
-# --- SVG Generation ---
-# Ensure the output directory exists
-os.makedirs(SVG_OUTPUT_DIR, exist_ok=True)
+    # # --- Debugging/Testing Section (Commented out) ---
+    # # This section appears to be for debugging specific indices or testing modifications.
+    # # It's commented out for regular execution.
+    # print(all_smiles_results[27073])
+    # all_smiles_results[27073] = "CC" # Example modification
+    # print(all_smiles_results[27297])
+    # all_smiles_results[27297] = "CC" # Example modification
+    # print(all_smiles_results[31837])
+    # all_smiles_results[31837] = "CC" # Example modification
+    # print(all_smiles_results[31995])
+    # all_smiles_results[31995] = "CC" # Example modification
+    # # --- End Debugging/Testing Section ---
 
-# SVG生成ループ: all_smiles_results を SVG_GROUP_SIZE ごとに分割して処理
-for i,mols in enumerate([all_smiles_results[idx:idx + SVG_GROUP_SIZE] for idx in range(0,len(all_smiles_results), SVG_GROUP_SIZE)]):
-    svg_parts = []
-    for ji, j_smiles in enumerate(mols):
-        try:
-            # SMILES文字列からOpen Babel分子オブジェクトを生成し、SVGデータを取得
-            mol = pybel.readstring("smi", j_smiles)
-            # TODO: Clarify the meaning of opt={'x':True} and the string replacement below
-            svg_content = mol.write('svg', opt={'x':True}).split( # opt={'x':True} の意味は要確認
-                '<g transform="translate(0,0)">\n')[1].split('</g>')[0].replace('opacity="1.0" stroke="rgb(0,0,0)"  stroke-width="2.0"', '') # この置換の理由も要確認
-            # グループ化してリストに追加
-            svg_parts.append('<g transform="translate({0},{1})">\n'.format(ji%10*100, int(ji/10)*100) + svg_content + '</g>')
-        except Exception as e:
-            print(f"Warning: Failed to generate SVG for SMILES '{j_smiles}' at index {i * SVG_GROUP_SIZE + ji}. Error: {e}")
-            # エラーが発生した場合、空のグループを追加するか、何も追加しないかを選択できます。
-            # ここでは何も追加しないことにします。
-            pass
-    tmp = svg_parts # Assign the collected parts to tmp
-    # SVGファイルへの書き込み
-    output_svg_path = os.path.join(SVG_OUTPUT_DIR, f'{i}.svg')
-    with open(output_svg_path, mode='w') as f:
-        f.write("""<?xml version="1.0"?>
-<svg version="1.1" id="topsvg"
-xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
-xmlns:cml="http://www.xml-cml.org/schema" x="0" y="0" width="1000px" height="1900px" viewBox="0 0 1000 1900">
-<title> - Open Babel Depiction</title>
-<rect x="0" y="0" width="100" height="100" fill="white"/>"""+"\n".join(tmp)+'</svg>')
+
+    # --- SVG Generation ---
+    # Ensure the output directory exists
+    os.makedirs(SVG_OUTPUT_DIR, exist_ok=True)
+
+    # Delayed import of Open Babel to avoid importing it in worker processes
+    #try:
+    #    from openbabel import pybel
+    #except Exception as e:
+    #    print(f"Error importing openbabel: {e}\nIf running with a virtualenv, activate it and ensure openbabel is installed.")
+    #    raise
+
+    # SVG生成ループ: all_smiles_results を SVG_GROUP_SIZE ごとに分割して処理
+    # for i,mols in enumerate([all_smiles_results[idx:idx + SVG_GROUP_SIZE] for idx in range(0,len(all_smiles_results), SVG_GROUP_SIZE)]):
+    #     svg_parts = []
+    #     for ji, j_smiles in enumerate(mols):
+    #         try:
+    #             # SMILES文字列からOpen Babel分子オブジェクトを生成し、SVGデータを取得
+    #             mol = pybel.readstring("smi", j_smiles)
+    #             # TODO: Clarify the meaning of opt={'x':True} and the string replacement below
+    #             svg_content = mol.write('svg', opt={'x':True}).split( # opt={'x':True} の意味は要確認
+    #                 '<g transform="translate(0,0)">\n')[1].split('</g>')[0].replace('opacity="1.0" stroke="rgb(0,0,0)"  stroke-width="2.0"', '') # この置換の理由も要確認
+    #             # グループ化してリストに追加
+    #             svg_parts.append('<g transform="translate({0},{1})">\n'.format(ji%10*100, int(ji/10)*100) + svg_content + '</g>')
+    #         except Exception as e:
+    #             print(f"Warning: Failed to generate SVG for SMILES '{j_smiles}' at index {i * SVG_GROUP_SIZE + ji}. Error: {e}")
+    #             # エラーが発生した場合、空のグループを追加するか、何も追加しないかを選択できます。
+    #             # ここでは何も追加しないことにします。
+    #             pass
+    #     tmp = svg_parts # Assign the collected parts to tmp
+    #     # SVGファイルへの書き込み
+    #     output_svg_path = os.path.join(SVG_OUTPUT_DIR, f'{i}.svg')
+    #     with open(output_svg_path, mode='w') as f:
+    #         f.write("""<?xml version="1.0"?>
+    # <svg version="1.1" id="topsvg"
+    # xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+    # xmlns:cml="http://www.xml-cml.org/schema" x="0" y="0" width="1000px" height="1900px" viewBox="0 0 1000 1900">
+    # <title> - Open Babel Depiction</title>
+    # <rect x="0" y="0" width="100" height="100" fill="white"/>"""+"\n".join(tmp)+'</svg>')
 

@@ -1,5 +1,3 @@
-import re
-
 def mat2smiles(mat):
     bond_matrix = mat.bonds
     bond_symbols = ["", "", "=", "#"]
@@ -39,14 +37,13 @@ def mat2smiles(mat):
             return str(num)
         return "%" + str(num)
     
-    while smiles_parts.find("{") > 0:
+    while "{" in smiles_parts:
         i = smiles_parts.find("{")
         l = smiles_parts.find("}") 
+        ring_token = smiles_parts[i:l + 1]
         
         # 正規表現を使用してラベルを置換
         # 例: {1} を適切な SMILES 記法に変換
-        pattern = r'((?:[=#]{0,1}\{\d})*)(={0,1})\\' + smiles_parts[i:l] + r'}((?:[=#]*\d)*)'
-        replacement = r'\g<3>\g<2>' + sanit(counter) + r'\g<1>'
-        smiles_parts = re.sub(pattern, replacement, smiles_parts)
+        smiles_parts = smiles_parts.replace(ring_token, sanit(counter), 2)
         counter = counter + 1
     return smiles_parts

@@ -64,9 +64,11 @@ def create_single_bonds_map(carbon_type_list: list) -> Generator[np.ndarray, Non
         if next_node_index == len(bond_degrees): return
 
         for bond_candidate_index in range(start_index, len(bond_degrees)):
+            if bond_candidate_index == next_node_index:
+                continue
             if adjacency_matrix[bond_candidate_index][next_node_index] == 1 or bond_degrees[bond_candidate_index] == 0:
                 continue
-            
+
             # 候補が探索済みもしくは未探索のメチン、メチレン、メタンの最初でなければスキップ
             # これは同型の分子構造を抑制するために必要な制約です
             if visitable_nodes[bond_candidate_index] and bond_candidate_index-next_node_index>1: continue
@@ -107,6 +109,9 @@ def build_structure(input_structure):
     Returns:
         list: 一意な分子構造のリスト（二次元リスト形式）
     """
-    candidate_mols = [graph_utils.canonicalize(i) for i in create_single_bonds_map(input_structure) if graph_utils.is_connected_graph(i)]
-    unique_mols_list = molecule_transformations.unique_mols(molecule.Molecule(i) for i in np.unique(candidate_mols, axis=0))
+    candidate_mols = [
+        graph_utils.canonicalize(i) for i in create_single_bonds_map(input_structure) if graph_utils.is_connected_graph(i)]
+    unique_mols_list = molecule_transformations.unique_mols(
+        molecule.Molecule(i) for i in np.unique(candidate_mols, axis=0)
+        )
     return [[molecule_entity] for molecule_entity in unique_mols_list]

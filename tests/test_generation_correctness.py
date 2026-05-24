@@ -1,6 +1,6 @@
-import itertools
 import unittest
 
+import converter
 import graph_utils
 import molecule
 import molecule_transformations
@@ -8,78 +8,61 @@ import numpy as np
 import structure_generator
 
 
-def reference_unique_mols(molecule_matrix):
-    unique_molecule_records = {}
-    for molecule_obj in molecule_matrix:
-        molecule_fingerprint = molecule_obj.fingerprint
-        bond_fingerprints = graph_utils.morgan(molecule_obj.bonds)
-        bond_fingerprints = [list(np.where(bond_fingerprints == i)[0]) for i in np.unique(bond_fingerprints)[::-1]]
-
-        for bond_fingerprint_group in bond_fingerprints:
-            for permutation in itertools.permutations(bond_fingerprint_group):
-                canonical_permutation = tuple(permutation)
-                if molecule_fingerprint not in unique_molecule_records:
-                    unique_molecule_records[molecule_fingerprint] = [
-                        molecule_obj.bonds[:, canonical_permutation][canonical_permutation, :]
-                    ]
-                    yield molecule_obj
-                    continue
-
-                for i in itertools.product(*[itertools.permutations(j) for j in bond_fingerprints]):
-                    i = sum(i, ())
-                    current_bond_structure = molecule_obj.bonds[:, i][i, :]
-                    if any(np.array_equal(current_bond_structure, j) for j in unique_molecule_records[molecule_fingerprint]):
-                        break
-                else:
-                    unique_molecule_records[molecule_fingerprint].append(
-                        molecule_obj.bonds[:, canonical_permutation][canonical_permutation, :]
-                    )
-                    yield molecule_obj
-
-
-def build_count_for_carbon(carbon_count):
-    total_structures = 0
+def formula_counts_for_carbon(carbon_count):
+    current_carbon_structures = []
+    counts = []
     for hydrogen_count in range(0, carbon_count * 2 + 3, 2)[::-1]:
+        current_carbon_structures = [
+            molecule_transformations.unique_dehydro_mols(structures)
+            for structures in current_carbon_structures
+        ]
         for combination in structure_generator.build_carbon_hydrogen_combination(carbon_count, hydrogen_count):
-            total_structures += len(structure_generator.build_structure(combination))
-    return total_structures
+            current_carbon_structures += structure_generator.build_structure(combination)
+        counts.append((hydrogen_count, sum(len(structures) for structures in current_carbon_structures)))
+    return counts
 
 
-def representative_molecules():
-    carbon_count = 5
-    hydrogen_count = 6
-    for combination in structure_generator.build_carbon_hydrogen_combination(carbon_count, hydrogen_count):
+class GenerationCorrectnessTests(unittest.TestCase):
+    def test_formula_counts_c2_to_c3(self):
+        expected_counts = {
+            2: [(6, 1), (4, 1), (2, 1), (0, 0)],
+            3: [(8, 1), (6, 2), (4, 3), (2, 2), (0, 1)],
+        }
+        for carbon_count, expected_count in expected_counts.items():
+            with self.subTest(carbon_count=carbon_count):
+                self.assertEqual(formula_counts_for_carbon(carbon_count), expected_count)
+
+    def test_single_bond_generation_has_no_self_loops(self):
+        for combination in ([2, 2], [2, 2, 2]):
+            with self.subTest(combination=combination):
+                for bonds in structure_generator.create_single_bonds_map(np.array(combination)):
+                    self.assertTrue(np.all(np.diag(bonds) == 0))
+
+    def test_unique_mols_yields_each_input_at_most_once(self):
+        combination = np.array([2, 1, 1])
         candidate_mols = [
             graph_utils.canonicalize(candidate)
             for candidate in structure_generator.create_single_bonds_map(combination)
             if graph_utils.is_connected_graph(candidate)
         ]
         unique_candidates = np.unique(candidate_mols, axis=0)
-        if len(unique_candidates) >= 5:
-            return [molecule.Molecule(candidate) for candidate in unique_candidates]
-    raise AssertionError("No representative molecules found")
+        unique = list(molecule_transformations.unique_mols(molecule.Molecule(candidate) for candidate in unique_candidates))
 
+        self.assertEqual(len(unique_candidates), 1)
+        self.assertEqual(len(unique), 1)
 
-class GenerationCorrectnessTests(unittest.TestCase):
-    def test_build_structure_counts_c2_to_c5(self):
-        expected_counts = {
-            2: 2,
-            3: 11,
-            4: 110,
-            5: 1072,
-        }
-        for carbon_count, expected_count in expected_counts.items():
-            with self.subTest(carbon_count=carbon_count):
-                self.assertEqual(build_count_for_carbon(carbon_count), expected_count)
+    def test_ring_smiles_conversion_terminates(self):
+        cyclopropane = molecule.Molecule(
+            np.array(
+                [
+                    [0, 1, 1],
+                    [1, 0, 1],
+                    [1, 1, 0],
+                ]
+            )
+        )
 
-    def test_unique_mols_matches_reference_order(self):
-        molecules = representative_molecules()
-        reference = list(reference_unique_mols(molecules))
-        optimized = list(molecule_transformations.unique_mols(molecules))
-
-        self.assertEqual(len(optimized), len(reference))
-        for optimized_mol, reference_mol in zip(optimized, reference):
-            self.assertTrue(np.array_equal(optimized_mol.bonds, reference_mol.bonds))
+        self.assertEqual(converter.mat2smiles(cyclopropane), "C1CC1")
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ import structure_generator
 
 
 def benchmark_generation(max_carbon: int) -> None:
+    """炭素数を増やしながら、生成される分子構造の数と処理時間、メモリ使用量を測定するベンチマーク関数。"""
     for carbon_count in range(2, max_carbon + 1):
         total_inputs = 0
         total_structures = 0
@@ -35,9 +36,10 @@ def benchmark_generation(max_carbon: int) -> None:
 
 def representative_molecules(carbon_count: int, hydrogen_count: int, min_candidates: int) -> list:
     for combination in structure_generator.build_carbon_hydrogen_combination(carbon_count, hydrogen_count):
+        carbon_type_list = np.asarray(combination)
         candidate_mols = [
             graph_utils.canonicalize(candidate)
-            for candidate in structure_generator.create_single_bonds_map(combination)
+            for candidate in structure_generator.create_single_bonds_map(carbon_type_list)
             if graph_utils.is_connected_graph(candidate)
         ]
         unique_candidates = np.unique(candidate_mols, axis=0)
@@ -66,7 +68,7 @@ def main() -> None:
     parser.add_argument("--max-carbon", type=int, default=5)
     parser.add_argument("--unique-carbon", type=int, default=6)
     parser.add_argument("--unique-hydrogen", type=int, default=8)
-    parser.add_argument("--min-candidates", type=int, default=10)
+    parser.add_argument("--min-candidates", type=int, default=2)
     parser.add_argument("--unique-repeats", type=int, default=3)
     args = parser.parse_args()
 

@@ -41,7 +41,7 @@ def build_carbon_hydrogen_combination(
 
 
 def create_single_bonds_map(
-    carbon_type_list: list,
+    carbon_type_list: list | np.ndarray,
 ) -> Generator[np.ndarray, None, None]:
     """Generate single-bond adjacency matrices for a carbon valence pattern."""
 

@@ -83,6 +83,11 @@ class GenerationCorrectnessTests(unittest.TestCase):
 
         self.assertEqual(converter.mat2smiles(cyclopropane), "C1CC1")
 
+    def test_high_symmetry_tetravalent_c9_generation(self):
+        structures = structure_generator.build_structure(np.full(9, 4))
+
+        self.assertEqual(sum(len(group) for group in structures), 16)
+
 
 if __name__ == "__main__":
     unittest.main()

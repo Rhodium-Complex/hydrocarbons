@@ -1,16 +1,25 @@
 """Module for generating unique molecular structures and their dehydrogenated variants."""
 from collections.abc import Generator, Iterable
+import importlib
+from importlib.util import find_spec
 import itertools
+from typing import Callable
 
 import numpy as np
 
 import graph_utils
 import molecule
 
-try:
-    from hydrocarbon_rust import has_permutation_match as _rust_has_permutation_match
-except ImportError:
-    _rust_has_permutation_match = None
+_rust_module = (
+    importlib.import_module("hydrocarbon_rust")
+    if find_spec("hydrocarbon_rust")
+    else None
+)
+_rust_has_permutation_match: Callable | None = (
+    getattr(_rust_module, "has_permutation_match", None)
+    if _rust_module is not None
+    else None
+)
 
 
 def _permuted_matrix_key(bonds: np.ndarray, permutation: tuple) -> tuple:
@@ -18,67 +27,70 @@ def _permuted_matrix_key(bonds: np.ndarray, permutation: tuple) -> tuple:
     return (len(permutation), permuted_bonds.tobytes())
 
 
-def _matching_prefix_records(
-    matrix_bytes: bytes,
-    num_atoms: int,
-    permutation: tuple,
-    record_keys: tuple,
-) -> tuple:
-    matched_records = []
-    for record_key in record_keys:
-        for row_position, row_index in enumerate(permutation):
-            matrix_row_offset = row_index * num_atoms
-            record_row_offset = row_position * num_atoms
-            for column_position, column_index in enumerate(permutation):
-                matrix_value = matrix_bytes[matrix_row_offset + column_index]
-                record_value = record_key[record_row_offset + column_position]
-                if matrix_value != record_value:
-                    break
-            else:
-                continue
-            break
-        else:
-            matched_records.append(record_key)
-    return tuple(matched_records)
-
-
 def _has_permutation_match_python(
     matrix_bytes: bytes,
     num_atoms: int,
-    permutation_groups: tuple,
+    bond_fingerprints: list,
     record_keys: tuple,
 ) -> bool:
-    def search(
-        group_index: int,
-        permutation_prefix: tuple,
+    allowed_candidates_by_position = []
+    for group in bond_fingerprints:
+        group_candidates = tuple(group)
+        allowed_candidates_by_position.extend([group_candidates] * len(group))
+
+    permutation = [-1] * num_atoms
+    used_candidates = [False] * num_atoms
+
+    def compatible_records(
+        record_position: int,
+        matrix_index: int,
         candidate_records: tuple,
-    ) -> bool:
-        if group_index == len(permutation_groups):
+    ) -> tuple:
+        matched_records = []
+        matrix_row_offset = matrix_index * num_atoms
+        for record_key in candidate_records:
+            record_row_offset = record_position * num_atoms
+            for previous_position in range(record_position):
+                previous_matrix_index = permutation[previous_position]
+                if (
+                    matrix_bytes[matrix_row_offset + previous_matrix_index]
+                    != record_key[record_row_offset + previous_position]
+                ):
+                    break
+            else:
+                matched_records.append(record_key)
+        return tuple(matched_records)
+
+    def search(record_position: int, candidate_records: tuple) -> bool:
+        if record_position == num_atoms:
             return bool(candidate_records)
 
-        for group_permutation in permutation_groups[group_index]:
-            next_permutation = permutation_prefix + group_permutation
-            next_candidate_records = _matching_prefix_records(
-                matrix_bytes,
-                num_atoms,
-                next_permutation,
+        for matrix_index in allowed_candidates_by_position[record_position]:
+            if used_candidates[matrix_index]:
+                continue
+
+            next_candidate_records = compatible_records(
+                record_position,
+                matrix_index,
                 candidate_records,
             )
-            if next_candidate_records and search(
-                group_index + 1,
-                next_permutation,
-                next_candidate_records,
-            ):
+            if not next_candidate_records:
+                continue
+
+            permutation[record_position] = matrix_index
+            used_candidates[matrix_index] = True
+            if search(record_position + 1, next_candidate_records):
                 return True
+            used_candidates[matrix_index] = False
+            permutation[record_position] = -1
         return False
 
-    return search(0, (), record_keys)
+    return search(0, record_keys)
 
 
 def _has_permutation_match(
     bonds: np.ndarray,
     bond_fingerprints: list,
-    permutation_groups: tuple,
     record_keys: set,
 ) -> bool:
     num_atoms = len(bonds)
@@ -97,7 +109,7 @@ def _has_permutation_match(
     return _has_permutation_match_python(
         matrix_bytes,
         num_atoms,
-        permutation_groups,
+        bond_fingerprints,
         tuple(record_keys),
     )
 
@@ -138,13 +150,9 @@ def unique_mols(
             len(molecule_obj),
             set(),
         )
-        permutation_groups = tuple(
-            tuple(itertools.permutations(group)) for group in bond_fingerprints
-        )
         if _has_permutation_match(
             bonds_for_keys,
             bond_fingerprints,
-            permutation_groups,
             record_keys,
         ):
             continue
@@ -179,10 +187,19 @@ def unique_dehydro_mols(dehydro_stream) -> list:
                 tmp = mol.bonds.copy()
                 tmp[i][j] += 1
                 tmp[j][i] += 1
-                yield molecule.Molecule(tmp)
+                yield tmp
 
     def generate_molecules(molecule_groups):
+        seen_candidate_keys = set()
         for row in molecule_groups:
-            yield from dehydrogenase(row)
+            for candidate_bonds in dehydrogenase(row):
+                candidate_key = np.ascontiguousarray(
+                    candidate_bonds,
+                    dtype=np.uint8,
+                ).tobytes()
+                if candidate_key in seen_candidate_keys:
+                    continue
+                seen_candidate_keys.add(candidate_key)
+                yield molecule.Molecule(candidate_bonds)
 
     return list(unique_mols(generate_molecules(dehydro_stream)))

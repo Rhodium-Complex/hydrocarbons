@@ -1,4 +1,4 @@
-"""Benchmark generation and uniqueness filtering of hydrocarbon structures."""
+"""Benchmark lower-level hydrocarbon generation primitives."""
 import argparse
 from pathlib import Path
 import sys
@@ -14,8 +14,8 @@ import numpy as np
 import structure_generator
 
 
-def benchmark_generation(max_carbon: int) -> None:
-    """Measure generated structure counts, runtime, and peak memory."""
+def benchmark_build_structure(max_carbon: int) -> None:
+    """Measure build_structure counts, runtime, and peak memory by carbon count."""
     for carbon_count in range(2, max_carbon + 1):
         total_inputs = 0
         total_structures = 0
@@ -43,11 +43,11 @@ def benchmark_generation(max_carbon: int) -> None:
         )
 
 
-def representative_molecules(
+def representative_unique_input(
     carbon_count: int,
     hydrogen_count: int,
     min_candidates: int,
-) -> list:
+) -> list[molecule.Molecule]:
     """Return a representative molecule set for uniqueness benchmarks."""
     for combination in structure_generator.build_carbon_hydrogen_combination(
         carbon_count,
@@ -74,7 +74,11 @@ def benchmark_unique_mols(
     repeats: int,
 ) -> None:
     """Measure unique molecule filtering for a representative input set."""
-    molecules = representative_molecules(carbon_count, hydrogen_count, min_candidates)
+    molecules = representative_unique_input(
+        carbon_count,
+        hydrogen_count,
+        min_candidates,
+    )
     for repeat_index in range(repeats):
         tracemalloc.start()
         start = time.perf_counter()
@@ -99,8 +103,8 @@ def main() -> None:
     parser.add_argument("--unique-repeats", type=int, default=3)
     args = parser.parse_args()
 
-    print("generation")
-    benchmark_generation(args.max_carbon)
+    print("build_structure")
+    benchmark_build_structure(args.max_carbon)
     print("unique_mols")
     benchmark_unique_mols(
         args.unique_carbon,

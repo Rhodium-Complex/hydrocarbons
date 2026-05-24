@@ -1,22 +1,10 @@
 """Main module for generating hydrocarbon structures and their SMILES representations."""
 import argparse
-from concurrent.futures import ProcessPoolExecutor
-import itertools
-import os
-import time
 
-import converter
-import molecule_transformations
-import structure_generator
+import generation_pipeline
 
 MIN_CARBON = 2
-MAX_CARBON = 10
-SVG_GROUP_SIZE = 190
-SVG_OUTPUT_DIR = "./image/"
-
-
-def _count_structures(structure_groups):
-    return sum(len(structures) for structures in structure_groups)
+MAX_CARBON = 9
 
 
 def main(
@@ -26,66 +14,16 @@ def main(
     include_smiles=True,
 ):
     """Generate hydrocarbon structures and optionally return their SMILES strings."""
-    with (
-        ProcessPoolExecutor(max_workers=workers) as dehydro_executor,
-        ProcessPoolExecutor(max_workers=workers) as structure_executor,
-    ):
-        all_smiles_results = ["N#N", "N#N", "N#N", "C"] if include_smiles else []
-
-        for carbon_count in range(min_carbon, max_carbon + 1):
-            current_carbon_structures = []
-            for hydrogen_count in range(0, carbon_count * 2 + 3, 2)[::-1]:
-                step_start = time.perf_counter()
-                if include_smiles:
-                    all_smiles_results.append("N#N")
-
-                dehydro_start = time.perf_counter()
-                future_dehydro = dehydro_executor.map(
-                    molecule_transformations.unique_dehydro_mols,
-                    current_carbon_structures,
-                )
-                current_carbon_structures = list(future_dehydro)
-                dehydro_seconds = time.perf_counter() - dehydro_start
-
-                build_start = time.perf_counter()
-                future_structure = structure_executor.map(
-                    structure_generator.build_structure,
-                    structure_generator.build_carbon_hydrogen_combination(
-                        carbon_count,
-                        hydrogen_count,
-                    ),
-                )
-
-                for structures in future_structure:
-                    current_carbon_structures += structures
-                build_seconds = time.perf_counter() - build_start
-
-                structure_count = _count_structures(current_carbon_structures)
-                smiles_seconds = 0.0
-                output_count = structure_count
-
-                if include_smiles:
-                    smiles_start = time.perf_counter()
-                    flattened_structures = itertools.chain.from_iterable(
-                        current_carbon_structures
-                    )
-                    future_smiles = map(converter.mat2smiles, flattened_structures)
-                    results_before_adding = len(all_smiles_results)
-                    all_smiles_results += list(future_smiles)
-                    output_count = len(all_smiles_results) - results_before_adding
-                    smiles_seconds = time.perf_counter() - smiles_start
-
-                total_seconds = time.perf_counter() - step_start
-                print(
-                    f"C={carbon_count} H={hydrogen_count} "
-                    f"dehydro={dehydro_seconds:.4f}s "
-                    f"build={build_seconds:.4f}s "
-                    f"smiles={smiles_seconds:.4f}s "
-                    f"count={output_count} "
-                    f"total={total_seconds:.4f}s",
-                    flush=True,
-                )
-    return all_smiles_results
+    return generation_pipeline.run_generation(
+        min_carbon=min_carbon,
+        max_carbon=max_carbon,
+        workers=workers,
+        include_smiles=include_smiles,
+        log_step=lambda result: print(
+            generation_pipeline.format_step_result(result),
+            flush=True,
+        ),
+    )
 
 
 def parse_args():

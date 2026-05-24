@@ -1,6 +1,7 @@
 import unittest
 
 import converter
+import generation_pipeline
 import graph_utils
 import molecule
 import molecule_transformations
@@ -87,6 +88,34 @@ class GenerationCorrectnessTests(unittest.TestCase):
         structures = structure_generator.build_structure(np.full(9, 4))
 
         self.assertEqual(sum(len(group) for group in structures), 16)
+
+    def test_pipeline_step_counts_c2_to_c3_without_smiles(self):
+        observed_counts = []
+
+        generation_pipeline.run_generation(
+            min_carbon=2,
+            max_carbon=3,
+            workers=2,
+            include_smiles=False,
+            log_step=lambda result: observed_counts.append(
+                (result.carbon_count, result.hydrogen_count, result.count)
+            ),
+        )
+
+        self.assertEqual(
+            observed_counts,
+            [
+                (2, 6, 1),
+                (2, 4, 1),
+                (2, 2, 1),
+                (2, 0, 0),
+                (3, 8, 1),
+                (3, 6, 2),
+                (3, 4, 3),
+                (3, 2, 2),
+                (3, 0, 1),
+            ],
+        )
 
 
 if __name__ == "__main__":

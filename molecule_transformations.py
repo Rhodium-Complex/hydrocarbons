@@ -25,7 +25,7 @@ def unique_mols(molecule_matrix: list) -> Generator[molecule.Molecule, None, Non
         
         for bond_fingerprint_group in bond_fingerprints:
             for permutation in itertools.permutations(bond_fingerprint_group):
-                canonical_permutation = sum(permutation, ())
+                canonical_permutation = tuple(permutation)
                 if molecule_fingerprint not in unique_molecule_records:
                     unique_molecule_records[molecule_fingerprint] = [molecule_obj .bonds[:,canonical_permutation][canonical_permutation,:]]
                     yield molecule_obj 

@@ -16,9 +16,18 @@ def formula_counts_for_carbon(carbon_count):
             molecule_transformations.unique_dehydro_mols(structures)
             for structures in current_carbon_structures
         ]
-        for combination in structure_generator.build_carbon_hydrogen_combination(carbon_count, hydrogen_count):
-            current_carbon_structures += structure_generator.build_structure(combination)
-        counts.append((hydrogen_count, sum(len(structures) for structures in current_carbon_structures)))
+        for combination in structure_generator.build_carbon_hydrogen_combination(
+            carbon_count,
+            hydrogen_count,
+        ):
+            generated_structures = structure_generator.build_structure(combination)
+            current_carbon_structures += generated_structures
+        counts.append(
+            (
+                hydrogen_count,
+                sum(len(structures) for structures in current_carbon_structures),
+            )
+        )
     return counts
 
 
@@ -30,12 +39,17 @@ class GenerationCorrectnessTests(unittest.TestCase):
         }
         for carbon_count, expected_count in expected_counts.items():
             with self.subTest(carbon_count=carbon_count):
-                self.assertEqual(formula_counts_for_carbon(carbon_count), expected_count)
+                self.assertEqual(
+                    formula_counts_for_carbon(carbon_count),
+                    expected_count,
+                )
 
     def test_single_bond_generation_has_no_self_loops(self):
         for combination in ([2, 2], [2, 2, 2]):
             with self.subTest(combination=combination):
-                for bonds in structure_generator.create_single_bonds_map(np.array(combination)):
+                for bonds in structure_generator.create_single_bonds_map(
+                    np.array(combination)
+                ):
                     self.assertTrue(np.all(np.diag(bonds) == 0))
 
     def test_unique_mols_yields_each_input_at_most_once(self):
@@ -46,7 +60,12 @@ class GenerationCorrectnessTests(unittest.TestCase):
             if graph_utils.is_connected_graph(candidate)
         ]
         unique_candidates = np.unique(candidate_mols, axis=0)
-        unique = list(molecule_transformations.unique_mols(molecule.Molecule(candidate) for candidate in unique_candidates))
+        unique = list(
+            molecule_transformations.unique_mols(
+                molecule.Molecule(candidate)
+                for candidate in unique_candidates
+            )
+        )
 
         self.assertEqual(len(unique_candidates), 1)
         self.assertEqual(len(unique), 1)

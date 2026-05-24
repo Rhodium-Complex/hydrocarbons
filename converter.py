@@ -1,4 +1,5 @@
 def mat2smiles(mat):
+    """Convert a molecule bond matrix into a compact SMILES-like string."""
     bond_matrix = mat.bonds
     bond_symbols = ["", "", "=", "#"]
     smiles_parts = [""] * len(bond_matrix[0])

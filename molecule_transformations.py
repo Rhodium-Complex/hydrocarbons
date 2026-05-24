@@ -1,3 +1,4 @@
+"""Module for generating unique molecular structures and their dehydrogenated variants."""
 from collections.abc import Generator, Iterable
 import itertools
 

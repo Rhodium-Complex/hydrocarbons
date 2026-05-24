@@ -1,3 +1,4 @@
+"""Module for generating hydrocarbon structures from carbon valence patterns."""
 from collections.abc import Generator
 
 import numpy as np

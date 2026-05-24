@@ -1,3 +1,4 @@
+"""Main module for generating hydrocarbon structures and their SMILES representations."""
 from concurrent.futures import ProcessPoolExecutor
 import itertools
 import os
@@ -85,24 +86,3 @@ if __name__ == "__main__":
 # 8 :...18 ...139 ...654 ...2082 ...4679 ...7437 ...7982 ...5308 ...1804
 # 9 :...35 ...338 ...1902 ...7244 ...19983 ...40139 ...57771 ...56437
 # 10 :...75 ...852 ...5568 ...24938 ...81909 ...201578 ..369067
-
-
-def second():
-    """Persist generated SMILES and optionally render SVG output."""
-    exit()
-    all_smiles_results = {}
-    import pickle
-
-    with open("mols.pkl", "wb") as f:
-        pickle.dump(all_smiles_results, f)
-
-    os.makedirs(SVG_OUTPUT_DIR, exist_ok=True)
-
-    # Delayed Open Babel import avoids importing it in worker processes.
-    # try:
-    #     from openbabel import pybel
-    # except Exception as e:
-    #     print(f"Error importing openbabel: {e}")
-    #     raise
-
-    # SVG generation code is intentionally left disabled.

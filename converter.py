@@ -1,3 +1,4 @@
+"""Module for converting molecule bond matrices into SMILES-like strings."""
 def mat2smiles(mat):
     """Convert a molecule bond matrix into a compact SMILES-like string."""
     bond_matrix = mat.bonds
@@ -31,18 +32,18 @@ def mat2smiles(mat):
             flag = True
         smiles_parts[i] += tmp
     smiles_parts = smiles_parts[0]
-    
+
     counter = 1
     def sanit(num):
         if num < 10:
             return str(num)
         return "%" + str(num)
-    
+
     while "{" in smiles_parts:
         i = smiles_parts.find("{")
-        l = smiles_parts.find("}") 
+        l = smiles_parts.find("}")
         ring_token = smiles_parts[i:l + 1]
-        
+
         # 正規表現を使用してラベルを置換
         # 例: {1} を適切な SMILES 記法に変換
         smiles_parts = smiles_parts.replace(ring_token, sanit(counter), 2)

@@ -1,3 +1,4 @@
+"""Benchmark generation and uniqueness filtering of hydrocarbon structures."""
 import argparse
 from pathlib import Path
 import sys
@@ -89,6 +90,7 @@ def benchmark_unique_mols(
 
 
 def main() -> None:
+    """Parse arguments and run benchmarks."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-carbon", type=int, default=5)
     parser.add_argument("--unique-carbon", type=int, default=6)

@@ -1,4 +1,6 @@
+"""Module for representing molecules as bond matrices and eigenvalue fingerprints."""
 import numpy as np
+
 
 
 class Molecule:

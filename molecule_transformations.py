@@ -14,24 +14,54 @@ def _permuted_matrix_key(bonds: np.ndarray, permutation: tuple) -> tuple:
     return (len(permutation), permuted_bonds.tobytes())
 
 
-def _flatten_permutation(permutation_groups: tuple) -> tuple:
-    return tuple(itertools.chain.from_iterable(permutation_groups))
+def _matching_prefix_records(matrix_bytes: bytes, num_atoms: int, permutation: tuple, record_keys: tuple) -> tuple:
+    matched_records = []
+    for record_key in record_keys:
+        for row_position, row_index in enumerate(permutation):
+            matrix_row_offset = row_index * num_atoms
+            record_row_offset = row_position * num_atoms
+            for column_position, column_index in enumerate(permutation):
+                if matrix_bytes[matrix_row_offset + column_index] != record_key[record_row_offset + column_position]:
+                    break
+            else:
+                continue
+            break
+        else:
+            matched_records.append(record_key)
+    return tuple(matched_records)
+
+
+def _has_permutation_match_python(matrix_bytes: bytes, num_atoms: int, permutation_groups: tuple, record_keys: tuple) -> bool:
+    def search(group_index: int, permutation_prefix: tuple, candidate_records: tuple) -> bool:
+        if group_index == len(permutation_groups):
+            return bool(candidate_records)
+
+        for group_permutation in permutation_groups[group_index]:
+            next_permutation = permutation_prefix + group_permutation
+            next_candidate_records = _matching_prefix_records(
+                matrix_bytes,
+                num_atoms,
+                next_permutation,
+                candidate_records,
+            )
+            if next_candidate_records and search(group_index + 1, next_permutation, next_candidate_records):
+                return True
+        return False
+
+    return search(0, (), record_keys)
 
 
 def _has_permutation_match(bonds: np.ndarray, bond_fingerprints: list, permutation_groups: tuple, record_keys: set) -> bool:
     num_atoms = len(bonds)
-    full_record_keys = [key for key_size, key in record_keys if key_size == num_atoms]
+    full_record_keys = tuple(key for key_size, key in record_keys if key_size == num_atoms)
     if not full_record_keys:
         return False
 
+    matrix_bytes = bonds.tobytes()
     if _rust_has_permutation_match is not None:
-        return _rust_has_permutation_match(bonds.tobytes(), num_atoms, bond_fingerprints, full_record_keys)
+        return _rust_has_permutation_match(matrix_bytes, num_atoms, bond_fingerprints, full_record_keys)
 
-    for permutation_group in itertools.product(*permutation_groups):
-        permutation = _flatten_permutation(permutation_group)
-        if _permuted_matrix_key(bonds, permutation) in record_keys:
-            return True
-    return False
+    return _has_permutation_match_python(matrix_bytes, num_atoms, permutation_groups, full_record_keys)
 
 def unique_mols(molecule_matrix: list) -> Generator[molecule.Molecule, None, None]:
     """

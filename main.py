@@ -10,7 +10,7 @@ import molecule_transformations
 import structure_generator
 
 MIN_CARBON = 2
-MAX_CARBON = 7
+MAX_CARBON = 10
 SVG_GROUP_SIZE = 190
 SVG_OUTPUT_DIR = "./image/"
 

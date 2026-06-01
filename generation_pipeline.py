@@ -66,6 +66,9 @@ def run_generation(
                     all_smiles_results.append("N#N")
 
                 dehydro_start = time.perf_counter()
+                current_carbon_structures = [
+                    structures for structures in current_carbon_structures if structures
+                ]
                 future_dehydro = dehydro_executor.map(
                     molecule_transformations.unique_dehydro_mols,
                     current_carbon_structures,

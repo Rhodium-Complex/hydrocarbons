@@ -1,19 +1,28 @@
+"""Small graph Laplacian drawing example."""
+from pathlib import Path
+
 import numpy as np
-import matplotlib.pyplot as plt
 
-Lap = np.array(
-    [[2, -1, 0, 0, -1],
-     [-1, 2,-1, 0, 0],
-     [ 0,-1, 2,-1, 0],
-     [ 0, 0,-1, 2,-1],
-     [ -1,-0, 0,-1, 2]])
-vals, vecs = np.linalg.eigh(Lap)
-vecs = vecs.T
-print(vecs)
 
-'''図示する'''
+def draw_laplacian_example(output_path: str | Path = "output.png") -> None:
+    """Draw a simple Laplacian eigenvector plot."""
+    import matplotlib.pyplot as plt
 
-plt.plot(vecs[1], vecs[2])
-plt.savefig('output.png')
+    laplacian = np.array(
+        [
+            [2, -1, 0, 0, -1],
+            [-1, 2, -1, 0, 0],
+            [0, -1, 2, -1, 0],
+            [0, 0, -1, 2, -1],
+            [-1, 0, 0, -1, 2],
+        ]
+    )
+    _, eigenvectors = np.linalg.eigh(laplacian)
+    eigenvectors = eigenvectors.T
 
-'''グラフラプラシアンから分子構造を描画する '''
+    plt.plot(eigenvectors[1], eigenvectors[2])
+    plt.savefig(output_path)
+
+
+if __name__ == "__main__":
+    draw_laplacian_example()

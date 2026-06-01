@@ -1,3 +1,6 @@
+"""
+Graph utilities for canonicalization and isomorphism checks.
+"""
 from collections import deque
 
 import numpy as np

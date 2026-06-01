@@ -49,9 +49,15 @@ Benchmark lower-level generation primitives:
 .\.venv\Scripts\python.exe benchmarks\benchmark_generation.py --max-carbon 5
 ```
 
+## Tests
+Run the correctness tests from the project root:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest -v
+```
+
 ## Language and Libraries Used
-Python 3
-Primarily utilizes standard libraries.
+Python 3.11+ with NumPy. The optional `drawing.py` example also uses Matplotlib.
 ## Important Note
 This program conducts a basic verification of the input molecule. It is not suitable for advanced chemical evaluations or in-depth structural analysis.
 

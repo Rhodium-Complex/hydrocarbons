@@ -6,6 +6,14 @@ build-backend = "maturin"
 name = "hydrocarbon-rust"
 version = "0.1.0"
 requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+drawing = [
+    "matplotlib>=3.7",
+]
 
 [tool.maturin]
 module-name = "hydrocarbon_rust"

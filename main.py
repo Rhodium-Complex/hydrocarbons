@@ -27,6 +27,7 @@ def main(
 
 
 def parse_args():
+    """Parse command-line arguments for the hydrocarbon generation script."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--min-carbon", type=int, default=MIN_CARBON)
     parser.add_argument("--max-carbon", type=int, default=MAX_CARBON)

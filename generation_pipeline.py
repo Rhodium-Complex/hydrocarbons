@@ -1,5 +1,6 @@
 """Pipeline orchestration for hydrocarbon structure generation."""
 from concurrent.futures import ProcessPoolExecutor
+from contextlib import nullcontext
 from dataclasses import dataclass
 import itertools
 import time
@@ -44,6 +45,13 @@ def format_step_result(result: GenerationStepResult) -> str:
     )
 
 
+def _map_generation_task(executor, function, iterable):
+    """Map a generation task, using direct iteration for sequential runs."""
+    if executor is None:
+        return map(function, iterable)
+    return executor.map(function, iterable)
+
+
 def run_generation(
     min_carbon: int,
     max_carbon: int,
@@ -52,9 +60,17 @@ def run_generation(
     log_step: Callable[[GenerationStepResult], None] | None = None,
 ) -> list[str]:
     """Generate hydrocarbon structures and optionally return their SMILES strings."""
+    use_processes = workers != 1
+    dehydro_context = (
+        ProcessPoolExecutor(max_workers=workers) if use_processes else nullcontext(None)
+    )
+    structure_context = (
+        ProcessPoolExecutor(max_workers=workers) if use_processes else nullcontext(None)
+    )
+
     with (
-        ProcessPoolExecutor(max_workers=workers) as dehydro_executor,
-        ProcessPoolExecutor(max_workers=workers) as structure_executor,
+        dehydro_context as dehydro_executor,
+        structure_context as structure_executor,
     ):
         all_smiles_results = ["N#N", "N#N", "N#N", "C"] if include_smiles else []
 
@@ -69,7 +85,8 @@ def run_generation(
                 current_carbon_structures = [
                     structures for structures in current_carbon_structures if structures
                 ]
-                future_dehydro = dehydro_executor.map(
+                future_dehydro = _map_generation_task(
+                    dehydro_executor,
                     molecule_transformations.unique_dehydro_mols,
                     current_carbon_structures,
                 )
@@ -77,7 +94,8 @@ def run_generation(
                 dehydro_seconds = time.perf_counter() - dehydro_start
 
                 build_start = time.perf_counter()
-                future_structure = structure_executor.map(
+                future_structure = _map_generation_task(
+                    structure_executor,
                     structure_generator.build_structure,
                     structure_generator.build_carbon_hydrogen_combination(
                         carbon_count,

@@ -129,6 +129,19 @@ class GenerationCorrectnessTests(unittest.TestCase):
             ],
         )
 
+    def test_pipeline_smiles_output_keeps_formula_separators(self):
+        """Test that flat SMILES output keeps downstream formula group markers."""
+        smiles_results = generation_pipeline.run_generation(
+            min_carbon=2,
+            max_carbon=2,
+            workers=1,
+            include_smiles=True,
+        )
+
+        self.assertEqual(smiles_results[:4], ["N#N", "N#N", "N#N", "C"])
+        self.assertEqual(smiles_results[4], "N#N")
+        self.assertIn("CC", smiles_results)
+
     def test_pipeline_workers_one_uses_sequential_map(self):
         """Test that the generation pipeline does not use ProcessPoolExecutor 
         when workers is set to 1."""

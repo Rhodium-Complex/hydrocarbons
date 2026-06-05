@@ -13,6 +13,7 @@ import structure_generator
 
 MoleculeGroup = list[molecule.Molecule]
 MoleculeGroups = list[MoleculeGroup]
+FORMULA_SEPARATOR = "N#N"
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,11 @@ def _map_generation_task(executor, function, iterable):
     return executor.map(function, iterable)
 
 
+def _append_formula_separator(results: list[str]) -> None:
+    """Append the external formula-group marker used by downstream exports."""
+    results.append(FORMULA_SEPARATOR)
+
+
 def run_generation(
     min_carbon: int,
     max_carbon: int,
@@ -72,14 +78,18 @@ def run_generation(
         dehydro_context as dehydro_executor,
         structure_context as structure_executor,
     ):
-        all_smiles_results = ["N#N", "N#N", "N#N", "C"] if include_smiles else []
+        all_smiles_results = (
+            [FORMULA_SEPARATOR, FORMULA_SEPARATOR, FORMULA_SEPARATOR, "C"]
+            if include_smiles
+            else []
+        )
 
         for carbon_count in range(min_carbon, max_carbon + 1):
             current_carbon_structures = []
             for hydrogen_count in range(0, carbon_count * 2 + 3, 2)[::-1]:
                 step_start = time.perf_counter()
                 if include_smiles:
-                    all_smiles_results.append("N#N")
+                    _append_formula_separator(all_smiles_results)
 
                 dehydro_start = time.perf_counter()
                 current_carbon_structures = [

@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from dataclasses import dataclass
 from io import BytesIO
 import importlib
+import logging
 from pathlib import Path
+import sys
 import textwrap
 from typing import Any
 
@@ -31,6 +34,55 @@ class PdfCell:
     text: str
 
 
+@dataclass(frozen=True)
+class CellPosition:
+    """Printable grid position for diagnostics."""
+
+    page: int
+    row: int
+    column: int
+    formula: str
+
+
+class _WarningCaptureHandler(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(level=logging.WARNING)
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.messages.append(record.getMessage())
+
+
+@contextmanager
+def capture_rdkit_warnings():
+    """Capture RDKit warning records emitted while drawing one cell."""
+    rd_base = importlib.import_module("rdkit.rdBase")
+    rd_base.LogToPythonLogger()
+    logger = logging.getLogger("rdkit")
+    handler = _WarningCaptureHandler()
+    logger.addHandler(handler)
+    try:
+        yield handler.messages
+    finally:
+        logger.removeHandler(handler)
+
+
+def report_cell_warnings(
+    warnings: list[str],
+    position: CellPosition,
+    smiles: str,
+) -> None:
+    """Print RDKit draw warnings with enough grid context to find the cell."""
+    for warning in warnings:
+        print(
+            "RDKit warning at "
+            f"page={position.page} row={position.row} column={position.column} "
+            f"formula={position.formula} smiles={smiles}: {warning}",
+            file=sys.stderr,
+            flush=True,
+        )
+
+
 def build_pdf_cells(
     groups: list[generation_pipeline.FormulaSmilesGroup],
 ) -> list[PdfCell]:
@@ -40,6 +92,31 @@ def build_pdf_cells(
         cells.append(PdfCell(kind="formula", text=group.label))
         cells.extend(PdfCell(kind="smiles", text=smiles) for smiles in group.smiles)
     return cells
+
+
+def build_formula_lookup(cells: list[PdfCell]) -> list[str]:
+    """Return the current formula label for each flattened cell."""
+    labels = []
+    current_label = ""
+    for cell in cells:
+        if cell.kind == "formula":
+            current_label = cell.text
+        labels.append(current_label)
+    return labels
+
+
+def cell_position_for_index(
+    cell_index: int,
+    formula_label: str,
+) -> CellPosition:
+    """Return one-based page, row, and column for a flattened cell index."""
+    page_cell_index = cell_index % GRID_CAPACITY
+    return CellPosition(
+        page=cell_index // GRID_CAPACITY + 1,
+        row=page_cell_index // GRID_COLUMNS + 1,
+        column=page_cell_index % GRID_COLUMNS + 1,
+        formula=formula_label,
+    )
 
 
 def page_count_for_cell_count(cell_count: int) -> int:
@@ -102,6 +179,7 @@ def export_formula_smiles_pdf(
     """Write formula-grouped SMILES structures to a B5 portrait PDF."""
     chem, draw2d, colors, ImageReader, canvas = _load_pdf_dependencies()
     cells = build_pdf_cells(groups)
+    formula_lookup = build_formula_lookup(cells)
     output_path = Path(output_path)
 
     page_width, page_height = PAGE_SIZE
@@ -115,9 +193,9 @@ def export_formula_smiles_pdf(
         if cell_index and cell_index % GRID_CAPACITY == 0:
             pdf.showPage()
 
-        page_cell_index = cell_index % GRID_CAPACITY
-        row = page_cell_index // GRID_COLUMNS
-        column = page_cell_index % GRID_COLUMNS
+        position = cell_position_for_index(cell_index, formula_lookup[cell_index])
+        row = position.row - 1
+        column = position.column - 1
         x = PAGE_MARGIN + column * cell_width
         y = page_height - PAGE_MARGIN - (row + 1) * cell_height
 
@@ -127,7 +205,9 @@ def export_formula_smiles_pdf(
             _draw_centered_text(pdf, cell.text, x, y, cell_width, cell_height)
             continue
 
-        png_bytes = _smiles_to_png_bytes(cell.text, image_pixels, chem, draw2d)
+        with capture_rdkit_warnings() as warnings:
+            png_bytes = _smiles_to_png_bytes(cell.text, image_pixels, chem, draw2d)
+        report_cell_warnings(warnings, position, cell.text)
         if png_bytes is None:
             pdf.setFillColor(colors.black)
             _draw_fallback_text(pdf, cell.text, x, y, cell_width, cell_height)

@@ -39,7 +39,7 @@ Export editable B5 SVG pages:
 The PDF export requires the optional `pdf` dependencies.
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install rdkit reportlab pillow
+.\.venv\Scripts\python.exe -m pip install ".[pdf]"
 ```
 
 The command prints one timing line per carbon/hydrogen step:

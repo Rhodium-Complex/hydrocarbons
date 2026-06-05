@@ -5,6 +5,7 @@ from pathlib import Path
 
 import export_structures_pdf
 import generation_pipeline
+import structure_export_layout as layout
 
 
 class PdfExportTests(unittest.TestCase):
@@ -14,26 +15,26 @@ class PdfExportTests(unittest.TestCase):
             generation_pipeline.FormulaSmilesGroup("C2H0", 2, 0, []),
         ]
 
-        cells = export_structures_pdf.build_pdf_cells(groups)
+        cells = layout.build_structure_cells(groups)
 
         self.assertEqual(
             cells,
             [
-                export_structures_pdf.PdfCell("formula", "CH4"),
-                export_structures_pdf.PdfCell("smiles", "C"),
-                export_structures_pdf.PdfCell("formula", "C2H0"),
+                layout.StructureCell("formula", "CH4"),
+                layout.StructureCell("smiles", "C"),
+                layout.StructureCell("formula", "C2H0"),
             ],
         )
 
     def test_grid_capacity_and_page_count(self):
-        self.assertAlmostEqual(export_structures_pdf.PAGE_SIZE[0], 176 * 72 / 25.4)
-        self.assertAlmostEqual(export_structures_pdf.PAGE_SIZE[1], 250 * 72 / 25.4)
-        self.assertEqual(export_structures_pdf.GRID_COLUMNS, 10)
-        self.assertEqual(export_structures_pdf.GRID_ROWS, 16)
-        self.assertEqual(export_structures_pdf.GRID_CAPACITY, 160)
-        self.assertEqual(export_structures_pdf.page_count_for_cell_count(0), 1)
-        self.assertEqual(export_structures_pdf.page_count_for_cell_count(160), 1)
-        self.assertEqual(export_structures_pdf.page_count_for_cell_count(161), 2)
+        self.assertAlmostEqual(layout.PAGE_SIZE[0], 176 * 72 / 25.4)
+        self.assertAlmostEqual(layout.PAGE_SIZE[1], 250 * 72 / 25.4)
+        self.assertEqual(layout.GRID_COLUMNS, 10)
+        self.assertEqual(layout.GRID_ROWS, 16)
+        self.assertEqual(layout.GRID_CAPACITY, 160)
+        self.assertEqual(layout.page_count_for_cell_count(0), 1)
+        self.assertEqual(layout.page_count_for_cell_count(160), 1)
+        self.assertEqual(layout.page_count_for_cell_count(161), 2)
 
     @unittest.skipUnless(
         importlib.util.find_spec("rdkit")
@@ -49,7 +50,11 @@ class PdfExportTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "structures.pdf"
-            export_structures_pdf.export_formula_smiles_pdf(groups, output_path)
+            export_structures_pdf.export_formula_smiles_pdf(
+                groups,
+                output_path,
+                report_warnings=False,
+            )
 
             self.assertTrue(output_path.exists())
             self.assertGreater(output_path.stat().st_size, 0)

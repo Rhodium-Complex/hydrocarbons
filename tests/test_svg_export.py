@@ -25,6 +25,7 @@ class SvgExportTests(unittest.TestCase):
             output_paths = export_structures_svg.export_formula_smiles_svg_pages(
                 groups,
                 output_prefix,
+                report_warnings=False,
             )
 
             self.assertEqual(len(output_paths), 1)

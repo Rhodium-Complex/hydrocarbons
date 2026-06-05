@@ -9,8 +9,8 @@ from pathlib import Path
 import textwrap
 from typing import Any
 
-import export_structures_pdf
 import generation_pipeline
+import structure_export_layout as layout
 
 PAGE_WIDTH_MM = 176
 PAGE_HEIGHT_MM = 250
@@ -47,7 +47,7 @@ def _smiles_to_svg_fragment(
 
     drawer = draw2d.MolDraw2DSVG(image_size, image_size)
     options = drawer.drawOptions()
-    options.bondLineWidth = export_structures_pdf.STRUCTURE_BOND_LINE_WIDTH
+    options.bondLineWidth = layout.STRUCTURE_BOND_LINE_WIDTH
     draw2d.PrepareAndDrawMolecule(drawer, mol)
     drawer.FinishDrawing()
     return _strip_svg_wrapper(drawer.GetDrawingText())
@@ -83,29 +83,30 @@ def _output_path_for_page(output_prefix: str | Path, page_number: int) -> Path:
 def export_formula_smiles_svg_pages(
     groups: list[generation_pipeline.FormulaSmilesGroup],
     output_prefix: str | Path,
+    report_warnings: bool = True,
 ) -> list[Path]:
     """Write formula-grouped SMILES structures to editable B5 SVG pages."""
     chem, draw2d = _load_svg_dependencies()
-    cells = export_structures_pdf.build_pdf_cells(groups)
-    formula_lookup = export_structures_pdf.build_formula_lookup(cells)
-    page_width, page_height = export_structures_pdf.PAGE_SIZE
+    cells = layout.build_structure_cells(groups)
+    formula_lookup = layout.build_formula_lookup(cells)
+    page_width, page_height = layout.PAGE_SIZE
     cell_width = (
-        page_width - 2 * export_structures_pdf.PAGE_MARGIN
-    ) / export_structures_pdf.GRID_COLUMNS
+        page_width - 2 * layout.PAGE_MARGIN
+    ) / layout.GRID_COLUMNS
     cell_height = (
-        page_height - 2 * export_structures_pdf.PAGE_MARGIN
-    ) / export_structures_pdf.GRID_ROWS
-    image_points = min(cell_width, cell_height) - 2 * export_structures_pdf.CELL_PADDING
+        page_height - 2 * layout.PAGE_MARGIN
+    ) / layout.GRID_ROWS
+    image_points = min(cell_width, cell_height) - 2 * layout.CELL_PADDING
     image_pixels = max(64, int(image_points * 2))
     scale = image_points / image_pixels
-    page_count = export_structures_pdf.page_count_for_cell_count(len(cells))
+    page_count = layout.page_count_for_cell_count(len(cells))
     output_paths = []
 
     for page_index in range(page_count):
         page_cells = cells[
             page_index
-            * export_structures_pdf.GRID_CAPACITY : (page_index + 1)
-            * export_structures_pdf.GRID_CAPACITY
+            * layout.GRID_CAPACITY : (page_index + 1)
+            * layout.GRID_CAPACITY
         ]
         elements = [
             (
@@ -116,15 +117,15 @@ def export_formula_smiles_svg_pages(
         ]
 
         for page_cell_index, cell in enumerate(page_cells):
-            cell_index = page_index * export_structures_pdf.GRID_CAPACITY + page_cell_index
-            position = export_structures_pdf.cell_position_for_index(
+            cell_index = page_index * layout.GRID_CAPACITY + page_cell_index
+            position = layout.cell_position_for_index(
                 cell_index,
                 formula_lookup[cell_index],
             )
-            row = page_cell_index // export_structures_pdf.GRID_COLUMNS
-            column = page_cell_index % export_structures_pdf.GRID_COLUMNS
-            x = export_structures_pdf.PAGE_MARGIN + column * cell_width
-            y = export_structures_pdf.PAGE_MARGIN + row * cell_height
+            row = page_cell_index // layout.GRID_COLUMNS
+            column = page_cell_index % layout.GRID_COLUMNS
+            x = layout.PAGE_MARGIN + column * cell_width
+            y = layout.PAGE_MARGIN + row * cell_height
 
             if cell.kind == "formula":
                 elements.append(
@@ -138,9 +139,24 @@ def export_formula_smiles_svg_pages(
                 )
                 continue
 
-            with export_structures_pdf.capture_rdkit_warnings() as warnings:
-                fragment = _smiles_to_svg_fragment(cell.text, image_pixels, chem, draw2d)
-            export_structures_pdf.report_cell_warnings(warnings, position, cell.text)
+            if report_warnings:
+                with layout.capture_rdkit_warnings() as warnings:
+                    fragment = _smiles_to_svg_fragment(
+                        cell.text,
+                        image_pixels,
+                        chem,
+                        draw2d,
+                    )
+                layout.report_cell_warnings(warnings, position, cell.text)
+            else:
+                rd_base = importlib.import_module("rdkit.rdBase")
+                with rd_base.BlockLogs():
+                    fragment = _smiles_to_svg_fragment(
+                        cell.text,
+                        image_pixels,
+                        chem,
+                        draw2d,
+                    )
             if fragment is None:
                 elements.append(_fallback_text(cell.text, x, y, cell_width, cell_height))
                 continue

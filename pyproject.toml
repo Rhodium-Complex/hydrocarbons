@@ -14,6 +14,11 @@ dependencies = [
 drawing = [
     "matplotlib>=3.7",
 ]
+pdf = [
+    "pillow>=10",
+    "rdkit>=2023.9",
+    "reportlab>=4",
+]
 
 [tool.maturin]
 module-name = "hydrocarbon_rust"

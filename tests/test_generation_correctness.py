@@ -142,6 +142,25 @@ class GenerationCorrectnessTests(unittest.TestCase):
         self.assertEqual(smiles_results[4], "N#N")
         self.assertIn("CC", smiles_results)
 
+    def test_structured_smiles_groups_c2(self):
+        """Test grouped SMILES output for B5 PDF export."""
+        groups = generation_pipeline.run_generation_smiles_groups(
+            min_carbon=2,
+            max_carbon=2,
+            workers=1,
+        )
+
+        self.assertEqual(
+            [group.label for group in groups],
+            ["CH4", "C2H6", "C2H4", "C2H2", "C2H0"],
+        )
+        smiles_by_label = {group.label: group.smiles for group in groups}
+        self.assertEqual(smiles_by_label["CH4"], ["C"])
+        self.assertIn("CC", smiles_by_label["C2H6"])
+        self.assertIn("C=C", smiles_by_label["C2H4"])
+        self.assertIn("C#C", smiles_by_label["C2H2"])
+        self.assertEqual(smiles_by_label["C2H0"], [])
+
     def test_pipeline_workers_one_uses_sequential_map(self):
         """Test that the generation pipeline does not use ProcessPoolExecutor 
         when workers is set to 1."""

@@ -24,6 +24,18 @@ Useful options:
 - `--workers`: number of worker processes for generation.
 - `--no-smiles`: skip SMILES conversion and report structure counts only.
 
+Export generated structures to a B5 PDF grid:
+
+```powershell
+.\.venv\Scripts\python.exe -u export_structures_pdf.py --max-carbon 8 --workers 4 --output structures_b5.pdf
+```
+
+The PDF export requires the optional `pdf` dependencies.
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install rdkit reportlab pillow
+```
+
 The command prints one timing line per carbon/hydrogen step:
 
 ```text
@@ -58,6 +70,7 @@ Run the correctness tests from the project root:
 
 ## Language and Libraries Used
 Python 3.11+ with NumPy. The optional `drawing.py` example also uses Matplotlib.
+The optional PDF export uses RDKit, ReportLab, and Pillow.
 ## Important Note
 This program conducts a basic verification of the input molecule. It is not suitable for advanced chemical evaluations or in-depth structural analysis.
 

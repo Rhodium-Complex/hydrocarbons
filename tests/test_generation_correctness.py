@@ -99,6 +99,17 @@ class GenerationCorrectnessTests(unittest.TestCase):
 
         self.assertEqual(sum(len(group) for group in structures), 16)
 
+    def test_canonicalize_preserves_c11_h24_candidate_size(self):
+        """Test that canonicalization does not drop vertices for C11H24 candidates."""
+        for combination in structure_generator.build_carbon_hydrogen_combination(11, 24):
+            for candidate in structure_generator.create_single_bonds_map(combination):
+                if not graph_utils.is_connected_graph(candidate):
+                    continue
+
+                canonical_candidate = graph_utils.canonicalize(candidate)
+
+                self.assertEqual(canonical_candidate.shape, candidate.shape)
+
     def test_pipeline_step_counts_c2_to_c3_without_smiles(self):
         """Test that the generation pipeline produces the expected counts for C2 and C3 
         without generating SMILES strings."""

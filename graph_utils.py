@@ -145,7 +145,7 @@ def canonicalize(adjacency_matrix: np.ndarray) -> np.ndarray:
     canonical_labels = assign_priorities(
         canonical_labels,
         adjacency_matrix,
-        MAX_PRIORITY,
+        max(MAX_PRIORITY, len(adjacency_matrix) + 1),
     )
     node_order = build_main_branch(
         canonical_labels,

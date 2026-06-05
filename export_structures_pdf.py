@@ -177,7 +177,7 @@ def export_formula_smiles_pdf(
     output_path: str | Path,
 ) -> None:
     """Write formula-grouped SMILES structures to a B5 portrait PDF."""
-    chem, draw2d, colors, ImageReader, canvas = _load_pdf_dependencies()
+    chem, draw2d, colors, image_reader, canvas = _load_pdf_dependencies()
     cells = build_pdf_cells(groups)
     formula_lookup = build_formula_lookup(cells)
     output_path = Path(output_path)
@@ -213,7 +213,7 @@ def export_formula_smiles_pdf(
             _draw_fallback_text(pdf, cell.text, x, y, cell_width, cell_height)
             continue
 
-        image = ImageReader(BytesIO(png_bytes))
+        image = image_reader(BytesIO(png_bytes))
         image_x = x + (cell_width - image_points) / 2
         image_y = y + (cell_height - image_points) / 2
         pdf.drawImage(

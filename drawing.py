@@ -2,11 +2,10 @@
 from pathlib import Path
 
 import numpy as np
-
+import matplotlib.pyplot as plt
 
 def draw_laplacian_example(output_path: str | Path = "output.png") -> None:
-    """Draw a simple Laplacian eigenvector plot."""
-    import matplotlib.pyplot as plt
+    """Draw a simple Laplacian eigenvector plot."""    
 
     laplacian = np.array(
         [

@@ -42,6 +42,17 @@ class FormulaSmilesGroup:
     smiles: list[str]
 
 
+@dataclass(frozen=True)
+class _FormulaStructureStep:
+    """Generated structures and timings for one molecular formula."""
+
+    carbon_count: int
+    hydrogen_count: int
+    structures: MoleculeGroups
+    dehydro_seconds: float
+    build_seconds: float
+
+
 def count_structures(structure_groups: MoleculeGroups) -> int:
     """Return the number of molecules stored in grouped structure lists."""
     return sum(len(structures) for structures in structure_groups)
@@ -57,6 +68,11 @@ def format_step_result(result: GenerationStepResult) -> str:
         f"count={result.count:>7} "
         f"total={result.total_seconds:>9.4f}s"
     )
+
+
+def print_step_result(result: GenerationStepResult) -> None:
+    """Print a generation step result immediately."""
+    print(format_step_result(result), flush=True)
 
 
 def _map_generation_task(
@@ -88,32 +104,19 @@ def _executor_context(workers: int | None):
     return ProcessPoolExecutor(max_workers=workers)
 
 
-def run_generation(
+def _iter_formula_structure_steps(
     min_carbon: int,
     max_carbon: int,
     workers: int | None = None,
-    include_smiles: bool = True,
-    include_stereo: bool = False,
-    log_step: Callable[[GenerationStepResult], None] | None = None,
-) -> list[str]:
-    """Generate hydrocarbon structures and optionally return their SMILES strings."""
+) -> Iterator[_FormulaStructureStep]:
+    """Yield generated structures for each formula in the existing order."""
     with (
         _executor_context(workers) as dehydro_executor,
         _executor_context(workers) as structure_executor,
     ):
-        all_smiles_results = (
-            [FORMULA_SEPARATOR, FORMULA_SEPARATOR, FORMULA_SEPARATOR, "C"]
-            if include_smiles
-            else []
-        )
-
         for carbon_count in range(min_carbon, max_carbon + 1):
             current_carbon_structures: MoleculeGroups = []
             for hydrogen_count in range(0, carbon_count * 2 + 3, 2)[::-1]:
-                step_start = time.perf_counter()
-                if include_smiles:
-                    _append_formula_separator(all_smiles_results)
-
                 dehydro_start = time.perf_counter()
                 current_carbon_structures = [
                     structures for structures in current_carbon_structures if structures
@@ -140,35 +143,73 @@ def run_generation(
                     current_carbon_structures += structures
                 build_seconds = time.perf_counter() - build_start
 
-                structure_count = count_structures(current_carbon_structures)
-                smiles_seconds = 0.0
-                output_count = structure_count
-
-                if include_smiles:
-                    smiles_start = time.perf_counter()
-                    flattened_structures = itertools.chain.from_iterable(
-                        current_carbon_structures
-                    )
-                    future_smiles = itertools.chain.from_iterable(
-                        converter.mat2smiles_variants(molecule_obj, include_stereo)
-                        for molecule_obj in flattened_structures
-                    )
-                    results_before_adding = len(all_smiles_results)
-                    all_smiles_results += list(future_smiles)
-                    output_count = len(all_smiles_results) - results_before_adding
-                    smiles_seconds = time.perf_counter() - smiles_start
-
-                step_result = GenerationStepResult(
+                yield _FormulaStructureStep(
                     carbon_count=carbon_count,
                     hydrogen_count=hydrogen_count,
+                    structures=current_carbon_structures,
                     dehydro_seconds=dehydro_seconds,
                     build_seconds=build_seconds,
+                )
+
+
+def _structure_smiles(
+    structure_groups: MoleculeGroups,
+    include_stereo: bool,
+) -> list[str]:
+    """Return flat SMILES variants for grouped structures."""
+    flattened_structures = itertools.chain.from_iterable(structure_groups)
+    return list(
+        itertools.chain.from_iterable(
+            converter.mat2smiles_variants(molecule_obj, include_stereo)
+            for molecule_obj in flattened_structures
+        )
+    )
+
+
+def run_generation(
+    min_carbon: int,
+    max_carbon: int,
+    workers: int | None = None,
+    include_smiles: bool = True,
+    include_stereo: bool = False,
+    log_step: Callable[[GenerationStepResult], None] | None = None,
+) -> list[str]:
+    """Generate hydrocarbon structures and optionally return their SMILES strings."""
+    all_smiles_results = (
+        [FORMULA_SEPARATOR, FORMULA_SEPARATOR, FORMULA_SEPARATOR, "C"]
+        if include_smiles
+        else []
+    )
+
+    for step in _iter_formula_structure_steps(min_carbon, max_carbon, workers):
+        if include_smiles:
+            _append_formula_separator(all_smiles_results)
+
+        structure_count = count_structures(step.structures)
+        smiles_seconds = 0.0
+        output_count = structure_count
+
+        if include_smiles:
+            smiles_start = time.perf_counter()
+            smiles = _structure_smiles(step.structures, include_stereo)
+            all_smiles_results += smiles
+            output_count = len(smiles)
+            smiles_seconds = time.perf_counter() - smiles_start
+
+        if log_step is not None:
+            log_step(
+                GenerationStepResult(
+                    carbon_count=step.carbon_count,
+                    hydrogen_count=step.hydrogen_count,
+                    dehydro_seconds=step.dehydro_seconds,
+                    build_seconds=step.build_seconds,
                     smiles_seconds=smiles_seconds,
                     count=output_count,
-                    total_seconds=time.perf_counter() - step_start,
+                    total_seconds=(
+                        step.dehydro_seconds + step.build_seconds + smiles_seconds
+                    ),
                 )
-                if log_step is not None:
-                    log_step(step_result)
+            )
     return all_smiles_results
 
 
@@ -192,72 +233,49 @@ def run_generation_smiles_groups(
             )
         )
 
-    with (
-        _executor_context(workers) as dehydro_executor,
-        _executor_context(workers) as structure_executor,
-    ):
-        for carbon_count in range(min_carbon, max_carbon + 1):
-            current_carbon_structures: MoleculeGroups = []
-            for hydrogen_count in range(0, carbon_count * 2 + 3, 2)[::-1]:
-                step_start = time.perf_counter()
+    for step in _iter_formula_structure_steps(min_carbon, max_carbon, workers):
+        smiles_start = time.perf_counter()
+        smiles = _structure_smiles(step.structures, include_stereo)
+        smiles_seconds = time.perf_counter() - smiles_start
 
-                dehydro_start = time.perf_counter()
-                current_carbon_structures = [
-                    structures for structures in current_carbon_structures if structures
-                ]
-                future_dehydro = _map_generation_task(
-                    dehydro_executor,
-                    molecule_transformations.unique_dehydro_mols,
-                    current_carbon_structures,
-                )
-                current_carbon_structures = list(future_dehydro)
-                dehydro_seconds = time.perf_counter() - dehydro_start
+        formula_groups.append(
+            FormulaSmilesGroup(
+                label=format_formula_label(step.carbon_count, step.hydrogen_count),
+                carbon_count=step.carbon_count,
+                hydrogen_count=step.hydrogen_count,
+                smiles=smiles,
+            )
+        )
 
-                build_start = time.perf_counter()
-                future_structure = _map_generation_task(
-                    structure_executor,
-                    structure_generator.build_structure,
-                    structure_generator.build_carbon_hydrogen_combination(
-                        carbon_count,
-                        hydrogen_count,
+        if log_step is not None:
+            log_step(
+                GenerationStepResult(
+                    carbon_count=step.carbon_count,
+                    hydrogen_count=step.hydrogen_count,
+                    dehydro_seconds=step.dehydro_seconds,
+                    build_seconds=step.build_seconds,
+                    smiles_seconds=smiles_seconds,
+                    count=len(smiles),
+                    total_seconds=(
+                        step.dehydro_seconds + step.build_seconds + smiles_seconds
                     ),
                 )
-
-                for structures in future_structure:
-                    current_carbon_structures += structures
-                build_seconds = time.perf_counter() - build_start
-
-                smiles_start = time.perf_counter()
-                flattened_structures = itertools.chain.from_iterable(
-                    current_carbon_structures
-                )
-                smiles = list(
-                    itertools.chain.from_iterable(
-                        converter.mat2smiles_variants(molecule_obj, include_stereo)
-                        for molecule_obj in flattened_structures
-                    )
-                )
-                smiles_seconds = time.perf_counter() - smiles_start
-
-                formula_groups.append(
-                    FormulaSmilesGroup(
-                        label=format_formula_label(carbon_count, hydrogen_count),
-                        carbon_count=carbon_count,
-                        hydrogen_count=hydrogen_count,
-                        smiles=smiles,
-                    )
-                )
-
-                if log_step is not None:
-                    log_step(
-                        GenerationStepResult(
-                            carbon_count=carbon_count,
-                            hydrogen_count=hydrogen_count,
-                            dehydro_seconds=dehydro_seconds,
-                            build_seconds=build_seconds,
-                            smiles_seconds=smiles_seconds,
-                            count=len(smiles),
-                            total_seconds=time.perf_counter() - step_start,
-                        )
-                    )
+            )
     return formula_groups
+
+
+def run_export_smiles_groups(
+    min_carbon: int,
+    max_carbon: int,
+    workers: int | None = None,
+    include_stereo: bool = False,
+) -> list[FormulaSmilesGroup]:
+    """Generate formula-grouped SMILES with standard export logging."""
+    return run_generation_smiles_groups(
+        min_carbon=min_carbon,
+        max_carbon=max_carbon,
+        workers=workers,
+        include_methane=True,
+        include_stereo=include_stereo,
+        log_step=print_step_result,
+    )

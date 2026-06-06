@@ -21,10 +21,7 @@ def main(
         workers=workers,
         include_smiles=include_smiles,
         include_stereo=include_stereo,
-        log_step=lambda result: print(
-            generation_pipeline.format_step_result(result),
-            flush=True,
-        ),
+        log_step=generation_pipeline.print_step_result,
     )
 
 
@@ -41,31 +38,10 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    all_smiles_results = main(
+    main(
         min_carbon=args.min_carbon,
         max_carbon=args.max_carbon,
         workers=args.workers,
         include_smiles=not args.no_smiles,
         include_stereo=args.include_stereo,
     )
-
-
-# --- Example Output Counts (C: H=...) ---
-# 2 :1 1 1 0
-# 3 :1 2 3 2 1
-# 4 :2 5 9 11 7 3
-# 5 :3 10 26 40 40 21 6
-# 6 :5 25 77 159 217 185 85 19
-# 7 :9 56 222 574 1029 1229 920 356 50
-# 8 :18 139 652 2069 4656 7396 7950 5289 1804 204
-
-# 8/28 21:50-9/1 22:33
-# 2 :...1 ...1 ...1 ...
-# 3 :...1 ...2 ...3 ...2 ...1
-# 4 :...2 ...5 ...9 ...11 ...7 ...3
-# 5 :...3 ...10 ...26 ...40 ...40 ...21 ...6
-# 6 :...5 ...25 ...77 ...159 ...217 ...185 ...85 ...19
-# 7 :...9 ...56 ...222 ...575 ...1031 ...1230 ...920 ...356 ...50
-# 8 :...18 ...139 ...654 ...2082 ...4679 ...7437 ...7982 ...5308 ...1804
-# 9 :...35 ...338 ...1902 ...7244 ...19983 ...40139 ...57771 ...56437
-# 10 :...75 ...852 ...5568 ...24938 ...81909 ...201578 ..369067

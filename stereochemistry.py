@@ -11,6 +11,7 @@ import molecule
 
 
 HYDROGEN_LIGAND = -1
+EzLabel = tuple[int, int, str]
 
 
 @dataclass(frozen=True)
@@ -35,7 +36,23 @@ class EzDoubleBond:
 class EzAssignment:
     """E/Z labels assigned to stereogenic double bonds."""
 
-    labels: tuple[tuple[int, int, str], ...]
+    labels: tuple[EzLabel, ...]
+
+    @property
+    def single_label(self) -> EzLabel | None:
+        """Return the only E/Z label when this assignment targets one bond."""
+        if len(self.labels) != 1:
+            return None
+        return self.labels[0]
+
+    @property
+    def single_edge(self) -> tuple[int, int] | None:
+        """Return the normalized edge for a single-bond assignment."""
+        single_label = self.single_label
+        if single_label is None:
+            return None
+        atom1, atom2, _label = single_label
+        return (min(atom1, atom2), max(atom1, atom2))
 
 
 @dataclass(frozen=True)
@@ -50,10 +67,9 @@ class EzAnalysis:
         assignment: EzAssignment,
     ) -> EzDoubleBond | None:
         """Return the double bond described by a single-bond E/Z assignment."""
-        if len(assignment.labels) != 1:
+        edge = assignment.single_edge
+        if edge is None:
             return None
-        atom1, atom2, _label = assignment.labels[0]
-        edge = (min(atom1, atom2), max(atom1, atom2))
         for double_bond in self.double_bonds:
             if edge == (double_bond.atom1, double_bond.atom2):
                 return double_bond
@@ -199,7 +215,7 @@ def _enumerate_assignments(
     def assignment_key(
         assignment: EzAssignment,
         automorphism: tuple[int, ...],
-    ) -> tuple[tuple[int, int, str], ...]:
+    ) -> tuple[EzLabel, ...]:
         mapped_labels = []
         for atom1, atom2, label in assignment.labels:
             mapped_atom1 = automorphism[atom1]

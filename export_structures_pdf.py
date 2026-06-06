@@ -142,16 +142,11 @@ def parse_args():
 def main() -> None:
     """Generate structures and export them to a B5 PDF."""
     args = parse_args()
-    groups = generation_pipeline.run_generation_smiles_groups(
+    groups = generation_pipeline.run_export_smiles_groups(
         min_carbon=args.min_carbon,
         max_carbon=args.max_carbon,
         workers=args.workers,
-        include_methane=True,
         include_stereo=args.include_stereo,
-        log_step=lambda result: print(
-            generation_pipeline.format_step_result(result),
-            flush=True,
-        ),
     )
     try:
         export_formula_smiles_pdf(groups, args.output)

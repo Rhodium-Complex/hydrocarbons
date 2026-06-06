@@ -62,14 +62,11 @@ def _tree_stereo_smiles(mat, assignment, analysis):
     if int((bond_matrix > 0).sum() // 2) != len(bond_matrix) - 1:
         return None
 
-    atom1, atom2, label = assignment.labels[0]
-    double_bond = analysis.double_bond_by_edge.get(
-        (min(atom1, atom2), max(atom1, atom2))
-    )
+    double_bond = analysis.double_bond_for_assignment(assignment)
     if double_bond is None:
         return None
-    high_ligands = {double_bond.high_ligand1, double_bond.high_ligand2}
-    if stereochemistry.HYDROGEN_LIGAND in high_ligands:
+    _atom1, _atom2, label = assignment.labels[0]
+    if not double_bond.has_carbon_high_ligands:
         return None
     if (
         bond_matrix[double_bond.high_ligand1][double_bond.atom1] != 1
@@ -157,3 +154,14 @@ def mat2stereo_smiles(mat, assignment, analysis=None):
         for atom1, atom2, label in assignment.labels
     )
     return mat2smiles(mat) + assignment_suffix
+
+
+def mat2smiles_variants(mat, include_stereo: bool = False) -> list[str]:
+    """Return one or more SMILES outputs for a molecule."""
+    if not include_stereo:
+        return [mat2smiles(mat)]
+    analysis = stereochemistry.analyze_ez(mat)
+    return [
+        mat2stereo_smiles(mat, assignment, analysis)
+        for assignment in analysis.assignments
+    ]

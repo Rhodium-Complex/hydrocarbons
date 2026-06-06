@@ -2,6 +2,10 @@
 import numpy as np
 
 
+def implicit_hydrogens(bonds: np.ndarray) -> np.ndarray:
+    """Return implicit hydrogens per carbon, assuming tetravalent hydrocarbons."""
+    return 4 - np.sum(bonds, axis=1)
+
 
 class Molecule:
     """Represent a molecule with its bond matrix and eigenvalue fingerprint."""

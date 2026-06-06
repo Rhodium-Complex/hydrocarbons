@@ -10,7 +10,6 @@ from typing import TypeVar
 import converter
 import molecule
 import molecule_transformations
-import stereochemistry
 import structure_generator
 
 MoleculeGroup = list[molecule.Molecule]
@@ -74,20 +73,6 @@ def _map_generation_task(
 def _append_formula_separator(results: list[str]) -> None:
     """Append the external formula-group marker used by downstream exports."""
     results.append(FORMULA_SEPARATOR)
-
-
-def _molecule_smiles_variants(
-    molecule_obj: molecule.Molecule,
-    include_stereo: bool,
-) -> list[str]:
-    """Return one or more output SMILES variants for a molecule."""
-    if not include_stereo:
-        return [converter.mat2smiles(molecule_obj)]
-    analysis = stereochemistry.analyze_ez(molecule_obj)
-    return [
-        converter.mat2stereo_smiles(molecule_obj, assignment, analysis)
-        for assignment in analysis.assignments
-    ]
 
 
 def format_formula_label(carbon_count: int, hydrogen_count: int) -> str:
@@ -165,7 +150,7 @@ def run_generation(
                         current_carbon_structures
                     )
                     future_smiles = itertools.chain.from_iterable(
-                        _molecule_smiles_variants(molecule_obj, include_stereo)
+                        converter.mat2smiles_variants(molecule_obj, include_stereo)
                         for molecule_obj in flattened_structures
                     )
                     results_before_adding = len(all_smiles_results)
@@ -248,7 +233,7 @@ def run_generation_smiles_groups(
                 )
                 smiles = list(
                     itertools.chain.from_iterable(
-                        _molecule_smiles_variants(molecule_obj, include_stereo)
+                        converter.mat2smiles_variants(molecule_obj, include_stereo)
                         for molecule_obj in flattened_structures
                     )
                 )

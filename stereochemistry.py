@@ -7,6 +7,7 @@ import itertools
 import numpy as np
 
 import isomorphism
+import molecule
 
 
 HYDROGEN_LIGAND = -1
@@ -20,6 +21,14 @@ class EzDoubleBond:
     atom2: int
     high_ligand1: int
     high_ligand2: int
+
+    @property
+    def has_carbon_high_ligands(self) -> bool:
+        """Return whether both high-priority ligands are explicit carbons."""
+        return (
+            self.high_ligand1 != HYDROGEN_LIGAND
+            and self.high_ligand2 != HYDROGEN_LIGAND
+        )
 
 
 @dataclass(frozen=True)
@@ -35,12 +44,20 @@ class EzAnalysis:
 
     double_bonds: tuple[EzDoubleBond, ...]
     assignments: tuple[EzAssignment, ...]
-    double_bond_by_edge: dict[tuple[int, int], EzDoubleBond]
 
-
-def implicit_hydrogens(bonds: np.ndarray) -> np.ndarray:
-    """Return implicit hydrogens per carbon, assuming tetravalent hydrocarbons."""
-    return 4 - np.sum(bonds, axis=1)
+    def double_bond_for_assignment(
+        self,
+        assignment: EzAssignment,
+    ) -> EzDoubleBond | None:
+        """Return the double bond described by a single-bond E/Z assignment."""
+        if len(assignment.labels) != 1:
+            return None
+        atom1, atom2, _label = assignment.labels[0]
+        edge = (min(atom1, atom2), max(atom1, atom2))
+        for double_bond in self.double_bonds:
+            if edge == (double_bond.atom1, double_bond.atom2):
+                return double_bond
+        return None
 
 
 def _compressed_color_ids(signatures: list[tuple]) -> list[int]:
@@ -54,7 +71,7 @@ def _compressed_color_ids(signatures: list[tuple]) -> list[int]:
 
 def _refined_atom_colors(blocked: np.ndarray) -> list[int]:
     """Return integer atom colors from Weisfeiler-Lehman style refinement."""
-    hydrogens = implicit_hydrogens(blocked)
+    hydrogens = molecule.implicit_hydrogens(blocked)
     neighbors = [
         tuple(int(neighbor) for neighbor in np.where(blocked[index] > 0)[0])
         for index in range(len(blocked))
@@ -128,7 +145,7 @@ def _high_priority_ligand(
 
 
 def _find_ez_double_bonds_for_bonds(bonds: np.ndarray) -> tuple[EzDoubleBond, ...]:
-    hydrogens = implicit_hydrogens(bonds)
+    hydrogens = molecule.implicit_hydrogens(bonds)
     double_bonds = []
     for atom1, bond_row in enumerate(bonds):
         for atom2, bond_order in enumerate(bond_row[atom1 + 1 :], start=atom1 + 1):
@@ -226,8 +243,4 @@ def analyze_ez(molecule_obj) -> EzAnalysis:
     return EzAnalysis(
         double_bonds=double_bonds,
         assignments=_enumerate_assignments(molecule_obj.bonds, double_bonds),
-        double_bond_by_edge={
-            (double_bond.atom1, double_bond.atom2): double_bond
-            for double_bond in double_bonds
-        },
     )

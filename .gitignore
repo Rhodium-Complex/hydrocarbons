@@ -6,3 +6,6 @@ __pycache__/
 target/
 *.pyd
 *.dll
+outputs/
+structures_b5.pdf
+structures_b5_page_*.svg

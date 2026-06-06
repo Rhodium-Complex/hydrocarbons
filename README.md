@@ -23,18 +23,28 @@ Useful options:
 - `--max-carbon`: last carbon count to generate.
 - `--workers`: number of worker processes for generation.
 - `--no-smiles`: skip SMILES conversion and report structure counts only.
+- `--include-stereo`: expand formal E/Z stereoisomers during final SMILES output.
+
+For E/Z-aware SMILES output, enable stereo expansion:
+
+```powershell
+.\.venv\Scripts\python.exe -u main.py --max-carbon 8 --workers 4 --include-stereo
+```
 
 Export generated structures to a B5 PDF grid:
 
 ```powershell
-.\.venv\Scripts\python.exe -u export_structures_pdf.py --max-carbon 8 --workers 4 --output structures_b5.pdf
+.\.venv\Scripts\python.exe -u export_structures_pdf.py --max-carbon 8 --workers 4
 ```
 
 Export editable B5 SVG pages:
 
 ```powershell
-.\.venv\Scripts\python.exe -u export_structures_svg.py --max-carbon 8 --workers 4 --output-prefix structures_b5
+.\.venv\Scripts\python.exe -u export_structures_svg.py --max-carbon 8 --workers 4
 ```
+
+By default, PDF and SVG files are written under `outputs/`, which is ignored by Git.
+The PDF and SVG exporters also accept `--include-stereo`, `--output`, and `--output-prefix`.
 
 The PDF export requires the optional `pdf` dependencies.
 

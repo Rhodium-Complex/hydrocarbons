@@ -12,6 +12,7 @@ def main(
     max_carbon=MAX_CARBON,
     workers=None,
     include_smiles=True,
+    include_stereo=False,
 ):
     """Generate hydrocarbon structures and optionally return their SMILES strings."""
     return generation_pipeline.run_generation(
@@ -19,6 +20,7 @@ def main(
         max_carbon=max_carbon,
         workers=workers,
         include_smiles=include_smiles,
+        include_stereo=include_stereo,
         log_step=lambda result: print(
             generation_pipeline.format_step_result(result),
             flush=True,
@@ -33,6 +35,7 @@ def parse_args():
     parser.add_argument("--max-carbon", type=int, default=MAX_CARBON)
     parser.add_argument("--workers", type=int, default=None)
     parser.add_argument("--no-smiles", action="store_true")
+    parser.add_argument("--include-stereo", action="store_true")
     return parser.parse_args()
 
 
@@ -43,6 +46,7 @@ if __name__ == "__main__":
         max_carbon=args.max_carbon,
         workers=args.workers,
         include_smiles=not args.no_smiles,
+        include_stereo=args.include_stereo,
     )
 
 

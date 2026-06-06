@@ -11,6 +11,9 @@ from typing import Any
 import generation_pipeline
 import structure_export_layout as layout
 
+DEFAULT_OUTPUT_DIR = Path("outputs")
+DEFAULT_PDF_OUTPUT = DEFAULT_OUTPUT_DIR / "structures_b5.pdf"
+
 
 def _load_pdf_dependencies():
     try:
@@ -70,6 +73,7 @@ def export_formula_smiles_pdf(
     cells = layout.build_structure_cells(groups)
     formula_lookup = layout.build_formula_lookup(cells)
     output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     page_width, page_height = layout.PAGE_SIZE
     cell_width = (page_width - 2 * layout.PAGE_MARGIN) / layout.GRID_COLUMNS
@@ -130,7 +134,8 @@ def parse_args():
     parser.add_argument("--min-carbon", type=int, default=2)
     parser.add_argument("--max-carbon", type=int, default=8)
     parser.add_argument("--workers", type=int, default=None)
-    parser.add_argument("--output", type=Path, default=Path("structures_b5.pdf"))
+    parser.add_argument("--output", type=Path, default=DEFAULT_PDF_OUTPUT)
+    parser.add_argument("--include-stereo", action="store_true")
     return parser.parse_args()
 
 
@@ -142,6 +147,7 @@ def main() -> None:
         max_carbon=args.max_carbon,
         workers=args.workers,
         include_methane=True,
+        include_stereo=args.include_stereo,
         log_step=lambda result: print(
             generation_pipeline.format_step_result(result),
             flush=True,

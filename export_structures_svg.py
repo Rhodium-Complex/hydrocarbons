@@ -15,6 +15,8 @@ import structure_export_layout as layout
 PAGE_WIDTH_MM = 176
 PAGE_HEIGHT_MM = 250
 SVG_NAMESPACE = "http://www.w3.org/2000/svg"
+DEFAULT_OUTPUT_DIR = Path("outputs")
+DEFAULT_SVG_OUTPUT_PREFIX = DEFAULT_OUTPUT_DIR / "structures_b5"
 
 
 def _load_svg_dependencies():
@@ -77,6 +79,7 @@ def _output_path_for_page(output_prefix: str | Path, page_number: int) -> Path:
     output_prefix = Path(output_prefix)
     stem = output_prefix.stem if output_prefix.suffix else output_prefix.name
     parent = output_prefix.parent
+    parent.mkdir(parents=True, exist_ok=True)
     return parent / f"{stem}_page_{page_number:03d}.svg"
 
 
@@ -182,7 +185,8 @@ def parse_args():
     parser.add_argument("--min-carbon", type=int, default=2)
     parser.add_argument("--max-carbon", type=int, default=8)
     parser.add_argument("--workers", type=int, default=None)
-    parser.add_argument("--output-prefix", type=Path, default=Path("structures_b5"))
+    parser.add_argument("--output-prefix", type=Path, default=DEFAULT_SVG_OUTPUT_PREFIX)
+    parser.add_argument("--include-stereo", action="store_true")
     return parser.parse_args()
 
 
@@ -194,6 +198,7 @@ def main() -> None:
         max_carbon=args.max_carbon,
         workers=args.workers,
         include_methane=True,
+        include_stereo=args.include_stereo,
         log_step=lambda result: print(
             generation_pipeline.format_step_result(result),
             flush=True,

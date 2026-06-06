@@ -23,6 +23,58 @@ def permuted_matrix_key(bonds: np.ndarray, permutation: tuple) -> tuple:
     return (len(permutation), permuted_bonds.tobytes())
 
 
+def automorphisms(bonds: np.ndarray) -> list[tuple[int, ...]]:
+    """Return graph automorphisms for a single bond matrix."""
+    size = len(bonds)
+    signatures = [
+        (
+            int(np.sum(bonds[index])),
+            tuple(sorted(int(order) for order in bonds[index] if order > 0)),
+        )
+        for index in range(size)
+    ]
+    candidates_by_position = [
+        tuple(
+            candidate
+            for candidate, signature in enumerate(signatures)
+            if signature == signatures[position]
+        )
+        for position in range(size)
+    ]
+    search_order = sorted(
+        range(size),
+        key=lambda index: len(candidates_by_position[index]),
+    )
+    mapping = [-1] * size
+    used = [False] * size
+    results = []
+
+    def is_compatible(source: int, target: int) -> bool:
+        for previous_source, previous_target in enumerate(mapping):
+            if previous_target == -1:
+                continue
+            if bonds[source][previous_source] != bonds[target][previous_target]:
+                return False
+        return True
+
+    def search(depth: int) -> None:
+        if depth == size:
+            results.append(tuple(mapping))
+            return
+        source = search_order[depth]
+        for target in candidates_by_position[source]:
+            if used[target] or not is_compatible(source, target):
+                continue
+            mapping[source] = target
+            used[target] = True
+            search(depth + 1)
+            used[target] = False
+            mapping[source] = -1
+
+    search(0)
+    return results
+
+
 def _has_permutation_match_python(
     matrix_bytes: bytes,
     num_atoms: int,

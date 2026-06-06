@@ -31,8 +31,8 @@ def morgan(adjacency_matrix: np.ndarray) -> np.ndarray:
     unique_node_labels = np.unique(node_labels)
     while len(unique_node_labels) > flag:
         flag = len(unique_node_labels)
-        for i in range(len(unique_node_labels)):
-            node_labels[node_labels == unique_node_labels[i]] = base ** (flag - i)
+        for i, node_label in enumerate(unique_node_labels):
+            node_labels[node_labels == node_label] = base ** (flag - i)
         node_labels = connect_map @ node_labels
         unique_node_labels = np.unique(node_labels)
     return node_labels

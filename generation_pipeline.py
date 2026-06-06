@@ -10,6 +10,7 @@ from typing import TypeVar
 import converter
 import molecule
 import molecule_transformations
+import stereochemistry
 import structure_generator
 
 MoleculeGroup = list[molecule.Molecule]
@@ -75,6 +76,20 @@ def _append_formula_separator(results: list[str]) -> None:
     results.append(FORMULA_SEPARATOR)
 
 
+def _molecule_smiles_variants(
+    molecule_obj: molecule.Molecule,
+    include_stereo: bool,
+) -> list[str]:
+    """Return one or more output SMILES variants for a molecule."""
+    if not include_stereo:
+        return [converter.mat2smiles(molecule_obj)]
+    analysis = stereochemistry.analyze_ez(molecule_obj)
+    return [
+        converter.mat2stereo_smiles(molecule_obj, assignment, analysis)
+        for assignment in analysis.assignments
+    ]
+
+
 def format_formula_label(carbon_count: int, hydrogen_count: int) -> str:
     """Return a compact hydrocarbon formula label."""
     if carbon_count == 1:
@@ -93,6 +108,7 @@ def run_generation(
     max_carbon: int,
     workers: int | None = None,
     include_smiles: bool = True,
+    include_stereo: bool = False,
     log_step: Callable[[GenerationStepResult], None] | None = None,
 ) -> list[str]:
     """Generate hydrocarbon structures and optionally return their SMILES strings."""
@@ -148,7 +164,10 @@ def run_generation(
                     flattened_structures = itertools.chain.from_iterable(
                         current_carbon_structures
                     )
-                    future_smiles = map(converter.mat2smiles, flattened_structures)
+                    future_smiles = itertools.chain.from_iterable(
+                        _molecule_smiles_variants(molecule_obj, include_stereo)
+                        for molecule_obj in flattened_structures
+                    )
                     results_before_adding = len(all_smiles_results)
                     all_smiles_results += list(future_smiles)
                     output_count = len(all_smiles_results) - results_before_adding
@@ -173,6 +192,7 @@ def run_generation_smiles_groups(
     max_carbon: int,
     workers: int | None = None,
     include_methane: bool = True,
+    include_stereo: bool = False,
     log_step: Callable[[GenerationStepResult], None] | None = None,
 ) -> list[FormulaSmilesGroup]:
     """Generate SMILES strings grouped by molecular formula."""
@@ -226,7 +246,12 @@ def run_generation_smiles_groups(
                 flattened_structures = itertools.chain.from_iterable(
                     current_carbon_structures
                 )
-                smiles = list(map(converter.mat2smiles, flattened_structures))
+                smiles = list(
+                    itertools.chain.from_iterable(
+                        _molecule_smiles_variants(molecule_obj, include_stereo)
+                        for molecule_obj in flattened_structures
+                    )
+                )
                 smiles_seconds = time.perf_counter() - smiles_start
 
                 formula_groups.append(

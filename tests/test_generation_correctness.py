@@ -5,9 +5,11 @@ from unittest import mock
 import converter
 import generation_pipeline
 import graph_utils
+import isomorphism
 import molecule
 import molecule_transformations
 import numpy as np
+import stereochemistry
 import structure_generator
 
 
@@ -77,6 +79,25 @@ class GenerationCorrectnessTests(unittest.TestCase):
 
         self.assertEqual(len(unique_candidates), 1)
         self.assertEqual(len(unique), 1)
+
+    def test_isomorphism_automorphisms_for_symmetric_chain(self):
+        """Test automorphism enumeration for a symmetric carbon chain."""
+        butane_bonds = np.array(
+            [
+                [0, 1, 0, 0],
+                [1, 0, 1, 0],
+                [0, 1, 0, 1],
+                [0, 0, 1, 0],
+            ]
+        )
+
+        self.assertEqual(
+            set(isomorphism.automorphisms(butane_bonds)),
+            {
+                (0, 1, 2, 3),
+                (3, 2, 1, 0),
+            },
+        )
 
     def test_ring_smiles_conversion_terminates(self):
         """Test that the SMILES conversion for a high-symmetry ring terminates."""
@@ -171,6 +192,137 @@ class GenerationCorrectnessTests(unittest.TestCase):
         self.assertIn("C=C", smiles_by_label["C2H4"])
         self.assertIn("C#C", smiles_by_label["C2H2"])
         self.assertEqual(smiles_by_label["C2H0"], [])
+
+    def test_ethene_and_propene_have_no_ez_assignments(self):
+        """Test that terminal/simple alkenes without two distinct ligand pairs are not E/Z."""
+        ethene = molecule.Molecule(
+            np.array(
+                [
+                    [0, 2],
+                    [2, 0],
+                ]
+            )
+        )
+        propene = molecule.Molecule(
+            np.array(
+                [
+                    [0, 2, 0],
+                    [2, 0, 1],
+                    [0, 1, 0],
+                ]
+            )
+        )
+
+        ethene_analysis = stereochemistry.analyze_ez(ethene)
+        propene_analysis = stereochemistry.analyze_ez(propene)
+        self.assertEqual(ethene_analysis.double_bonds, ())
+        self.assertEqual(propene_analysis.double_bonds, ())
+        self.assertEqual(
+            ethene_analysis.assignments,
+            (stereochemistry.EzAssignment(labels=()),),
+        )
+
+    def test_two_butene_expands_to_e_and_z_smiles(self):
+        """Test that 2-butene is expanded into separate E/Z outputs."""
+        two_butene = molecule.Molecule(
+            np.array(
+                [
+                    [0, 1, 0, 0],
+                    [1, 0, 2, 0],
+                    [0, 2, 0, 1],
+                    [0, 0, 1, 0],
+                ]
+            )
+        )
+
+        analysis = stereochemistry.analyze_ez(two_butene)
+        smiles = [
+            converter.mat2stereo_smiles(two_butene, assignment, analysis)
+            for assignment in analysis.assignments
+        ]
+
+        self.assertEqual(len(analysis.assignments), 2)
+        self.assertEqual(smiles, ["C/C=C/C", "C/C=C\\C"])
+
+    def test_equal_ligands_do_not_create_ez_double_bond(self):
+        """Test that equal substituents on one alkene carbon prevent E/Z assignment."""
+        equal_methyls = molecule.Molecule(
+            np.array(
+                [
+                    [0, 2, 1, 1, 0],
+                    [2, 0, 0, 0, 1],
+                    [1, 0, 0, 0, 0],
+                    [1, 0, 0, 0, 0],
+                    [0, 1, 0, 0, 0],
+                ]
+            )
+        )
+
+        self.assertEqual(stereochemistry.analyze_ez(equal_methyls).double_bonds, ())
+
+    def test_multiple_double_bonds_expand_assignments(self):
+        """Test that two independent E/Z double bonds produce four assignments."""
+        octadiene = molecule.Molecule(
+            np.array(
+                [
+                    [0, 1, 0, 0, 0, 0, 0, 0],
+                    [1, 0, 2, 0, 0, 0, 0, 0],
+                    [0, 2, 0, 1, 0, 0, 0, 0],
+                    [0, 0, 1, 0, 1, 0, 0, 0],
+                    [0, 0, 0, 1, 0, 2, 0, 0],
+                    [0, 0, 0, 0, 2, 0, 1, 0],
+                    [0, 0, 0, 0, 0, 1, 0, 1],
+                    [0, 0, 0, 0, 0, 0, 1, 0],
+                ]
+            )
+        )
+
+        analysis = stereochemistry.analyze_ez(octadiene)
+        self.assertEqual(len(analysis.double_bonds), 2)
+        self.assertEqual(len(analysis.assignments), 4)
+
+    def test_cyclohexatriene_double_bonds_are_formal_ez_candidates(self):
+        """Test that ring double bonds are treated as formal E/Z candidates."""
+        cyclohexatriene = molecule.Molecule(
+            np.array(
+                [
+                    [0, 2, 0, 0, 0, 1],
+                    [2, 0, 1, 0, 0, 0],
+                    [0, 1, 0, 2, 0, 0],
+                    [0, 0, 2, 0, 1, 0],
+                    [0, 0, 0, 1, 0, 2],
+                    [1, 0, 0, 0, 2, 0],
+                ]
+            )
+        )
+
+        self.assertEqual(len(stereochemistry.analyze_ez(cyclohexatriene).double_bonds), 3)
+
+    def test_generation_stereo_flag_preserves_default_outputs(self):
+        """Test that stereo output is opt-in and default generation remains unchanged."""
+        default_groups = generation_pipeline.run_generation_smiles_groups(
+            min_carbon=4,
+            max_carbon=4,
+            workers=1,
+            include_methane=False,
+        )
+        stereo_groups = generation_pipeline.run_generation_smiles_groups(
+            min_carbon=4,
+            max_carbon=4,
+            workers=1,
+            include_methane=False,
+            include_stereo=True,
+        )
+
+        default_c4h8 = {
+            group.label: group.smiles for group in default_groups
+        }["C4H8"]
+        stereo_c4h8 = {
+            group.label: group.smiles for group in stereo_groups
+        }["C4H8"]
+        self.assertEqual(len(default_c4h8), 5)
+        self.assertGreater(len(stereo_c4h8), len(default_c4h8))
+        self.assertIn("C/C=C/C", stereo_c4h8)
 
     def test_pipeline_workers_one_uses_sequential_map(self):
         """Test that the generation pipeline does not use ProcessPoolExecutor 

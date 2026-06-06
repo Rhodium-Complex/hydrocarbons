@@ -144,13 +144,6 @@ def _path_stereo_smiles(mat, assignment, analysis):
     return "".join(parts)
 
 
-def _assignment_suffix(assignment):
-    return "".join(
-        f" [{label}:{atom1 + 1}-{atom2 + 1}]"
-        for atom1, atom2, label in assignment.labels
-    )
-
-
 def mat2stereo_smiles(mat, assignment, analysis=None):
     """Convert a molecule and E/Z assignment to a stereo-aware SMILES-like string."""
     if not assignment.labels:
@@ -162,4 +155,8 @@ def mat2stereo_smiles(mat, assignment, analysis=None):
     if path_smiles is not None:
         return path_smiles
 
-    return mat2smiles(mat) + _assignment_suffix(assignment)
+    assignment_suffix = "".join(
+        f" [{label}:{atom1 + 1}-{atom2 + 1}]"
+        for atom1, atom2, label in assignment.labels
+    )
+    return mat2smiles(mat) + assignment_suffix

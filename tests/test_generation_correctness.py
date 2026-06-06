@@ -244,6 +244,30 @@ class GenerationCorrectnessTests(unittest.TestCase):
         self.assertEqual(len(analysis.assignments), 2)
         self.assertEqual(smiles, ["C/C=C/C", "C/C=C\\C"])
 
+    def test_branched_alkene_expands_to_slash_stereo_smiles(self):
+        """Test that branched E/Z alkenes produce drawable slash SMILES."""
+        methyl_pentene = molecule.Molecule(
+            np.array(
+                [
+                    [0, 1, 0, 0, 0, 0],
+                    [1, 0, 2, 0, 0, 0],
+                    [0, 2, 0, 1, 0, 0],
+                    [0, 0, 1, 0, 1, 1],
+                    [0, 0, 0, 1, 0, 0],
+                    [0, 0, 0, 1, 0, 0],
+                ]
+            )
+        )
+
+        analysis = stereochemistry.analyze_ez(methyl_pentene)
+        smiles = [
+            converter.mat2stereo_smiles(methyl_pentene, assignment, analysis)
+            for assignment in analysis.assignments
+        ]
+
+        self.assertEqual(smiles, ["C/C=C/C(C)(C)", "C/C=C\\C(C)(C)"])
+        self.assertTrue(all("[E:" not in text and "[Z:" not in text for text in smiles))
+
     def test_equal_ligands_do_not_create_ez_double_bond(self):
         """Test that equal substituents on one alkene carbon prevent E/Z assignment."""
         equal_methyls = molecule.Molecule(

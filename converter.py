@@ -54,45 +54,12 @@ def mat2smiles(mat):
     return smiles_parts
 
 
-def _simple_path_order(bond_matrix):
-    binary_bonds = bond_matrix > 0
-    degrees = binary_bonds.sum(axis=1)
-    if len(bond_matrix) == 1:
-        return [0]
-    if degrees.max() > 2:
-        return None
-    endpoints = [int(index) for index, degree in enumerate(degrees) if degree == 1]
-    if len(endpoints) != 2:
-        return None
-
-    order = []
-    previous = -1
-    current = endpoints[0]
-    while True:
-        order.append(current)
-        neighbors = [
-            int(neighbor)
-            for neighbor in binary_bonds[current].nonzero()[0]
-            if int(neighbor) != previous
-        ]
-        if not neighbors:
-            break
-        previous, current = current, neighbors[0]
-        if current in order:
-            return None
-
-    if len(order) != len(bond_matrix):
-        return None
-    return order
-
-
-def _path_stereo_smiles(mat, assignment, analysis):
+def _tree_stereo_smiles(mat, assignment, analysis):
     if len(assignment.labels) != 1:
         return None
 
     bond_matrix = mat.bonds
-    order = _simple_path_order(bond_matrix)
-    if order is None:
+    if int((bond_matrix > 0).sum() // 2) != len(bond_matrix) - 1:
         return None
 
     atom1, atom2, label = assignment.labels[0]
@@ -104,44 +71,74 @@ def _path_stereo_smiles(mat, assignment, analysis):
     high_ligands = {double_bond.high_ligand1, double_bond.high_ligand2}
     if stereochemistry.HYDROGEN_LIGAND in high_ligands:
         return None
-
-    try:
-        double_index = next(
-            index
-            for index in range(len(order) - 1)
-            if {order[index], order[index + 1]} == {atom1, atom2}
-        )
-    except StopIteration:
+    if (
+        bond_matrix[double_bond.high_ligand1][double_bond.atom1] != 1
+        or bond_matrix[double_bond.high_ligand2][double_bond.atom2] != 1
+    ):
         return None
 
-    if double_index == 0 or double_index + 2 >= len(order):
-        return None
-    if order[double_index - 1] not in high_ligands:
-        return None
-    if order[double_index + 2] not in high_ligands:
-        return None
+    main_path = (
+        double_bond.high_ligand1,
+        double_bond.atom1,
+        double_bond.atom2,
+        double_bond.high_ligand2,
+    )
+    main_next = {
+        main_path[index]: main_path[index + 1]
+        for index in range(len(main_path) - 1)
+    }
+    main_edges = {
+        frozenset((main_path[index], main_path[index + 1]))
+        for index in range(len(main_path) - 1)
+    }
+    stereo_single_bonds = {
+        frozenset((main_path[0], main_path[1])): "/",
+        frozenset((main_path[2], main_path[3])): "/" if label == "E" else "\\",
+    }
 
-    left_slash = "/"
-    right_slash = "/" if label == "E" else "\\"
-    parts = ["C"]
-    for index in range(len(order) - 1):
-        left = order[index]
-        right = order[index + 1]
+    def bond_symbol(left, right):
+        edge = frozenset((left, right))
+        if edge in stereo_single_bonds:
+            return stereo_single_bonds[edge]
         bond = bond_matrix[left][right]
-        if bond == 1 and index == double_index - 1:
-            bond_symbol = left_slash
-        elif bond == 1 and index == double_index + 1:
-            bond_symbol = right_slash
-        elif bond == 1:
-            bond_symbol = ""
+        if bond == 1:
+            return ""
         elif bond == 2:
-            bond_symbol = "="
+            return "="
         elif bond == 3:
-            bond_symbol = "#"
-        else:
-            return None
-        parts.append(bond_symbol + "C")
-    return "".join(parts)
+            return "#"
+        return None
+
+    def emit_atom(atom, parent=None):
+        parts = ["C"]
+        next_main_atom = main_next.get(atom)
+        branch_neighbors = [
+            int(neighbor)
+            for neighbor in bond_matrix[atom].nonzero()[0]
+            if int(neighbor) != parent
+            and int(neighbor) != next_main_atom
+            and frozenset((atom, int(neighbor))) not in main_edges
+        ]
+        for neighbor in sorted(branch_neighbors):
+            symbol = bond_symbol(atom, neighbor)
+            if symbol is None:
+                return None
+            branch = emit_atom(neighbor, atom)
+            if branch is None:
+                return None
+            parts.append(f"({symbol}{branch})")
+
+        if next_main_atom is not None:
+            symbol = bond_symbol(atom, next_main_atom)
+            if symbol is None:
+                return None
+            child = emit_atom(next_main_atom, atom)
+            if child is None:
+                return None
+            parts.append(symbol + child)
+        return "".join(parts)
+
+    return emit_atom(main_path[0])
 
 
 def mat2stereo_smiles(mat, assignment, analysis=None):
@@ -151,9 +148,9 @@ def mat2stereo_smiles(mat, assignment, analysis=None):
     if analysis is None:
         analysis = stereochemistry.analyze_ez(mat)
 
-    path_smiles = _path_stereo_smiles(mat, assignment, analysis)
-    if path_smiles is not None:
-        return path_smiles
+    tree_smiles = _tree_stereo_smiles(mat, assignment, analysis)
+    if tree_smiles is not None:
+        return tree_smiles
 
     assignment_suffix = "".join(
         f" [{label}:{atom1 + 1}-{atom2 + 1}]"

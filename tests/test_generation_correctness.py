@@ -3,6 +3,7 @@ import unittest
 from unittest import mock
 
 import converter
+import deduplication
 import generation_pipeline
 import graph_utils
 import isomorphism
@@ -71,7 +72,7 @@ class GenerationCorrectnessTests(unittest.TestCase):
         ]
         unique_candidates = np.unique(candidate_mols, axis=0)
         unique = list(
-            molecule_transformations.unique_mols(
+            deduplication.unique_mols(
                 molecule.Molecule(candidate)
                 for candidate in unique_candidates
             )

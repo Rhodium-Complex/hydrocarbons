@@ -3,7 +3,7 @@ from collections.abc import Iterable
 
 import numpy as np
 
-from deduplication import unique_mols
+import deduplication
 import molecule
 
 
@@ -45,4 +45,4 @@ def unique_dehydro_mols(
                 seen_candidate_keys.add(candidate_key)
                 yield molecule.Molecule(candidate_bonds)
 
-    return list(unique_mols(generate_candidates(molecules)))
+    return list(deduplication.unique_mols(generate_candidates(molecules)))

@@ -7,9 +7,9 @@ import tracemalloc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import deduplication
 import graph_utils
 import molecule
-import molecule_transformations
 import numpy as np
 import structure_generator
 
@@ -82,7 +82,7 @@ def benchmark_unique_mols(
     for repeat_index in range(repeats):
         tracemalloc.start()
         start = time.perf_counter()
-        unique = list(molecule_transformations.unique_mols(molecules))
+        unique = list(deduplication.unique_mols(molecules))
         elapsed = time.perf_counter() - start
         _, peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()

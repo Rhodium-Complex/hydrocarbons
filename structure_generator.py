@@ -49,31 +49,35 @@ def create_single_bonds_map(
         adjacency_matrix,
         bond_degrees,
         visitable_nodes,
-        start_index=0,
+        candidate_start_index=0,
     ) -> Generator[np.ndarray, None, None]:
         """Recursively add valid single bonds to the adjacency matrix."""
+        atom_count = len(bond_degrees)
         unprocessed = np.where(bond_degrees > 0)[0]
         if len(unprocessed) == 0:
             yield adjacency_matrix
             return
         next_node_index = unprocessed[0]
 
-        if next_node_index == len(bond_degrees):
+        if next_node_index == atom_count:
             return
 
-        for bond_candidate_index in range(start_index, len(bond_degrees)):
+        for bond_candidate_index in range(candidate_start_index, atom_count):
+            # Reject invalid or duplicate edge choices before copying state.
             if bond_candidate_index == next_node_index:
                 continue
             if adjacency_matrix[bond_candidate_index][next_node_index] == 1:
                 continue
             if bond_degrees[bond_candidate_index] == 0:
                 continue
+            # Skip symmetric choices created by equal valence entries.
             if (
                 visitable_nodes[bond_candidate_index]
                 and bond_candidate_index - next_node_index > 1
             ):
                 continue
 
+            # Copy only after all pruning checks pass; this path is hot.
             updated_adj_matrix = adjacency_matrix.copy()
             updated_bond_counts = bond_degrees.copy()
             current_visit_flags = visitable_nodes.copy()

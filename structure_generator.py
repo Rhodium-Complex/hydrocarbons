@@ -113,11 +113,13 @@ def create_single_bonds_map(
 
 def build_structure(input_structure):
     """Build unique molecule structures from a carbon valence pattern."""
+    # Generate connected candidates and canonicalize them before deduplication.
     candidate_mols = [
         graph_utils.canonicalize(candidate)
         for candidate in create_single_bonds_map(input_structure)
         if graph_utils.is_connected_graph(candidate)
     ]
+    # Drop duplicate labeled matrices first, then remove structural isomorphs.
     unique_mols_list = deduplication.unique_mols(
         molecule.Molecule(candidate)
         for candidate in np.unique(candidate_mols, axis=0)

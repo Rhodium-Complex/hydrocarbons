@@ -11,9 +11,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-drawing = [
-    "matplotlib>=3.7",
-]
 pdf = [
     "pillow>=10",
     "rdkit>=2023.9",

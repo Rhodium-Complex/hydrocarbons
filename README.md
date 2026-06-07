@@ -85,7 +85,7 @@ Run the correctness tests from the project root:
 ```
 
 ## Language and Libraries Used
-Python 3.11+ with NumPy. The optional `drawing.py` example also uses Matplotlib.
+Python 3.11+ with NumPy.
 The optional PDF export uses RDKit, ReportLab, and Pillow. The SVG export uses RDKit.
 ## Important Note
 This program conducts a basic verification of the input molecule. It is not suitable for advanced chemical evaluations or in-depth structural analysis.

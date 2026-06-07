@@ -25,14 +25,18 @@ def morgan(adjacency_matrix: np.ndarray) -> np.ndarray:
     base = 4
 
     connect_map = adjacency_matrix
-    flag = 0
+    previous_unique_count = 0
 
     node_labels = base ** np.sum(connect_map, axis=1)
     unique_node_labels = np.unique(node_labels)
-    while len(unique_node_labels) > flag:
-        flag = len(unique_node_labels)
-        for i, node_label in enumerate(unique_node_labels):
-            node_labels[node_labels == node_label] = base ** (flag - i)
+    while len(unique_node_labels) > previous_unique_count:
+        unique_count = len(unique_node_labels)
+        previous_unique_count = unique_count
+        # Compress labels into deterministic powers before the next refinement.
+        for label_rank, node_label in enumerate(unique_node_labels):
+            node_labels[node_labels == node_label] = base ** (
+                unique_count - label_rank
+            )
         node_labels = connect_map @ node_labels
         unique_node_labels = np.unique(node_labels)
     return node_labels
@@ -49,24 +53,22 @@ def assign_priorities(
     root_index = canonical_labels.argmax()
     node_priorities[root_index] = max_priority
 
-    def priority_generator():
-        for i in range(max_priority)[::-1]:
-            yield i
-
-    priority_gen = priority_generator()
+    priority_gen = iter(range(max_priority - 1, -1, -1))
     stack = deque(
         [
-            i
-            for i in weighted_matrix[root_index].argsort()
-            if weighted_matrix[root_index][i]
+            node_index
+            for node_index in weighted_matrix[root_index].argsort()
+            if weighted_matrix[root_index][node_index]
         ]
     )
     while stack:
-        i = stack.popleft()
-        if node_priorities[i] == 0:
-            node_priorities[i] = next(priority_gen)
+        node_index = stack.popleft()
+        if node_priorities[node_index] == 0:
+            node_priorities[node_index] = next(priority_gen)
             stack.extend(
-                j for j in weighted_matrix[i].argsort() if weighted_matrix[i][j]
+                neighbor_index
+                for neighbor_index in weighted_matrix[node_index].argsort()
+                if weighted_matrix[node_index][neighbor_index]
             )
 
     return node_priorities * 10
@@ -107,32 +109,32 @@ def build_side_branches(
     priority_threshold: int = 10,
 ) -> list:
     """Append side branches to the canonical node order."""
-    counter = len(node_order) - 1
+    scan_index = len(node_order) - 1
     edge_values = (
-        binary_connection[node_order[counter]] * canonical_labels
-        + adjacency_matrix[node_order[counter]]
+        binary_connection[node_order[scan_index]] * canonical_labels
+        + adjacency_matrix[node_order[scan_index]]
     )
     if max(edge_values) <= priority_threshold:
-        counter = 0
+        scan_index = 0
 
     while max(canonical_labels) > priority_threshold:
         while max(edge_values) <= priority_threshold:
-            if counter >= len(node_order):
+            if scan_index >= len(node_order):
                 break
             edge_values = (
-                binary_connection[node_order[counter]] * canonical_labels
-                + adjacency_matrix[node_order[counter]]
+                binary_connection[node_order[scan_index]] * canonical_labels
+                + adjacency_matrix[node_order[scan_index]]
             )
-            counter += 1
+            scan_index += 1
 
         current_node = edge_values.argmax()
         node_order = node_order + [current_node]
         canonical_labels[current_node] = 0
         edge_values = binary_connection[current_node] * canonical_labels
-        counter += 1
+        scan_index += 1
 
         if max(edge_values) == 0:
-            counter = 0
+            scan_index = 0
 
     return node_order
 

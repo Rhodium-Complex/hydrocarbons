@@ -8,6 +8,7 @@ from pathlib import Path
 import textwrap
 from typing import Any
 
+import generation_output
 import generation_pipeline
 import structure_export_layout as layout
 
@@ -64,7 +65,7 @@ def _draw_fallback_text(pdf, smiles: str, x: float, y: float, width: float, heig
 
 
 def export_formula_smiles_pdf(
-    groups: list[generation_pipeline.FormulaSmilesGroup],
+    groups: list[generation_output.FormulaSmilesGroup],
     output_path: str | Path,
     report_warnings: bool = True,
 ) -> None:

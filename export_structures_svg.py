@@ -9,6 +9,7 @@ from pathlib import Path
 import textwrap
 from typing import Any
 
+import generation_output
 import generation_pipeline
 import structure_export_layout as layout
 
@@ -84,7 +85,7 @@ def _output_path_for_page(output_prefix: str | Path, page_number: int) -> Path:
 
 
 def export_formula_smiles_svg_pages(
-    groups: list[generation_pipeline.FormulaSmilesGroup],
+    groups: list[generation_output.FormulaSmilesGroup],
     output_prefix: str | Path,
     report_warnings: bool = True,
 ) -> list[Path]:

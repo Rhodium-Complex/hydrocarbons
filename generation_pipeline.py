@@ -9,13 +9,18 @@ from collections.abc import Callable, Iterable, Iterator
 from typing import TypeVar
 
 import converter
+from generation_output import (
+    FORMULA_SEPARATOR,
+    FormulaSmilesGroup,
+    flatten_legacy_smiles_groups,
+    format_formula_label,
+)
 import molecule
 import molecule_transformations
 import structure_generator
 
 MoleculeGroup = list[molecule.Molecule]
 MoleculeGroups = list[MoleculeGroup]
-FORMULA_SEPARATOR = "N#N"
 MIN_PARALLEL_STEREO_STRUCTURES = 256
 TaskInput = TypeVar("TaskInput")
 TaskOutput = TypeVar("TaskOutput")
@@ -32,16 +37,6 @@ class GenerationStepResult:
     smiles_seconds: float
     count: int
     total_seconds: float
-
-
-@dataclass(frozen=True)
-class FormulaSmilesGroup:
-    """SMILES strings grouped by molecular formula."""
-
-    label: str
-    carbon_count: int
-    hydrogen_count: int
-    smiles: list[str]
 
 
 @dataclass(frozen=True)
@@ -87,18 +82,6 @@ def _map_generation_task(
     if executor is None:
         return map(function, iterable)
     return executor.map(function, iterable, chunksize=chunksize)
-
-
-def _append_formula_separator(results: list[str]) -> None:
-    """Append the external formula-group marker used by downstream exports."""
-    results.append(FORMULA_SEPARATOR)
-
-
-def format_formula_label(carbon_count: int, hydrogen_count: int) -> str:
-    """Return a compact hydrocarbon formula label."""
-    if carbon_count == 1:
-        return f"CH{hydrogen_count}"
-    return f"C{carbon_count}H{hydrogen_count}"
 
 
 def _executor_context(workers: int | None):
@@ -223,58 +206,33 @@ def run_generation(
     log_step: Callable[[GenerationStepResult], None] | None = None,
 ) -> list[str]:
     """Generate hydrocarbon structures and optionally return their SMILES strings."""
-    all_smiles_results = (
-        [FORMULA_SEPARATOR, FORMULA_SEPARATOR, FORMULA_SEPARATOR, "C"]
-        if include_smiles
-        else []
-    )
+    if include_smiles:
+        return flatten_legacy_smiles_groups(
+            run_generation_smiles_groups(
+                min_carbon=min_carbon,
+                max_carbon=max_carbon,
+                workers=workers,
+                include_methane=True,
+                include_stereo=include_stereo,
+                log_step=log_step,
+            )
+        )
 
-    with ExitStack() as stack:
-        smiles_executor = None
-        for step in _iter_formula_structure_steps(min_carbon, max_carbon, workers):
-            if include_smiles:
-                _append_formula_separator(all_smiles_results)
-
+    for step in _iter_formula_structure_steps(min_carbon, max_carbon, workers):
+        if log_step is not None:
             structure_count = count_structures(step.structures)
-            smiles_seconds = 0.0
-            output_count = structure_count
-
-            if include_smiles:
-                smiles_start = time.perf_counter()
-                if (
-                    smiles_executor is None
-                    and _should_parallelize_stereo_smiles(
-                        structure_count,
-                        include_stereo,
-                        workers,
-                    )
-                ):
-                    smiles_executor = stack.enter_context(_executor_context(workers))
-                smiles = _structure_smiles(
-                    step.structures,
-                    include_stereo,
-                    executor=smiles_executor,
-                    workers=workers,
+            log_step(
+                GenerationStepResult(
+                    carbon_count=step.carbon_count,
+                    hydrogen_count=step.hydrogen_count,
+                    dehydro_seconds=step.dehydro_seconds,
+                    build_seconds=step.build_seconds,
+                    smiles_seconds=0.0,
+                    count=structure_count,
+                    total_seconds=step.dehydro_seconds + step.build_seconds,
                 )
-                all_smiles_results += smiles
-                output_count = len(smiles)
-                smiles_seconds = time.perf_counter() - smiles_start
-
-            if log_step is not None:
-                log_step(
-                    GenerationStepResult(
-                        carbon_count=step.carbon_count,
-                        hydrogen_count=step.hydrogen_count,
-                        dehydro_seconds=step.dehydro_seconds,
-                        build_seconds=step.build_seconds,
-                        smiles_seconds=smiles_seconds,
-                        count=output_count,
-                        total_seconds=(
-                            step.dehydro_seconds + step.build_seconds + smiles_seconds
-                        ),
-                    )
-                )
-    return all_smiles_results
+            )
+    return []
 
 
 def run_generation_smiles_groups(

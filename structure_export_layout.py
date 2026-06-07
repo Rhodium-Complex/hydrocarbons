@@ -7,7 +7,7 @@ import importlib
 import logging
 import sys
 
-import generation_pipeline
+import generation_output
 
 MM_TO_POINTS = 72.0 / 25.4
 PAGE_SIZE = (176 * MM_TO_POINTS, 250 * MM_TO_POINTS)
@@ -49,7 +49,7 @@ class _WarningCaptureHandler(logging.Handler):
 
 
 def build_structure_cells(
-    groups: list[generation_pipeline.FormulaSmilesGroup],
+    groups: list[generation_output.FormulaSmilesGroup],
 ) -> list[StructureCell]:
     """Flatten formula groups into header and structure cells."""
     cells = []

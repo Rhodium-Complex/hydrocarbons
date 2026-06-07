@@ -3,9 +3,9 @@ from collections.abc import Generator
 
 import numpy as np
 
+import deduplication
 import graph_utils
 import molecule
-import molecule_transformations
 
 
 def build_carbon_hydrogen_combination(
@@ -118,7 +118,7 @@ def build_structure(input_structure):
         for candidate in create_single_bonds_map(input_structure)
         if graph_utils.is_connected_graph(candidate)
     ]
-    unique_mols_list = molecule_transformations.unique_mols(
+    unique_mols_list = deduplication.unique_mols(
         molecule.Molecule(candidate)
         for candidate in np.unique(candidate_mols, axis=0)
     )

@@ -10,9 +10,7 @@ from typing import TypeVar
 
 import converter
 from generation_output import (
-    FORMULA_SEPARATOR,
     FormulaSmilesGroup,
-    flatten_legacy_smiles_groups,
     format_formula_label,
 )
 import molecule
@@ -201,23 +199,9 @@ def run_generation(
     min_carbon: int,
     max_carbon: int,
     workers: int | None = None,
-    include_smiles: bool = True,
-    include_stereo: bool = False,
     log_step: Callable[[GenerationStepResult], None] | None = None,
-) -> list[str]:
-    """Generate hydrocarbon structures and optionally return their SMILES strings."""
-    if include_smiles:
-        return flatten_legacy_smiles_groups(
-            run_generation_smiles_groups(
-                min_carbon=min_carbon,
-                max_carbon=max_carbon,
-                workers=workers,
-                include_methane=True,
-                include_stereo=include_stereo,
-                log_step=log_step,
-            )
-        )
-
+) -> None:
+    """Generate hydrocarbon structures and optionally log structure counts."""
     for step in _iter_formula_structure_steps(min_carbon, max_carbon, workers):
         if log_step is not None:
             structure_count = count_structures(step.structures)
@@ -232,7 +216,6 @@ def run_generation(
                     total_seconds=step.dehydro_seconds + step.build_seconds,
                 )
             )
-    return []
 
 
 def run_generation_smiles_groups(

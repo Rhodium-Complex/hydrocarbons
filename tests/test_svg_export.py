@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 import export_structures_svg
-import generation_pipeline
+import generation_output
 
 
 class SvgExportTests(unittest.TestCase):
@@ -16,8 +16,8 @@ class SvgExportTests(unittest.TestCase):
 
     def test_svg_export_smoke(self):
         groups = [
-            generation_pipeline.FormulaSmilesGroup("CH4", 1, 4, ["C"]),
-            generation_pipeline.FormulaSmilesGroup("bad", 0, 0, ["not-a-smiles"]),
+            generation_output.FormulaSmilesGroup("CH4", 1, 4, ["C"]),
+            generation_output.FormulaSmilesGroup("bad", 0, 0, ["not-a-smiles"]),
         ]
 
         with tempfile.TemporaryDirectory() as tmpdir:

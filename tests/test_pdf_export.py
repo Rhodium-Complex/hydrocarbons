@@ -4,15 +4,15 @@ import unittest
 from pathlib import Path
 
 import export_structures_pdf
-import generation_pipeline
+import generation_output
 import structure_export_layout as layout
 
 
 class PdfExportTests(unittest.TestCase):
     def test_pdf_cells_include_formula_headers(self):
         groups = [
-            generation_pipeline.FormulaSmilesGroup("CH4", 1, 4, ["C"]),
-            generation_pipeline.FormulaSmilesGroup("C2H0", 2, 0, []),
+            generation_output.FormulaSmilesGroup("CH4", 1, 4, ["C"]),
+            generation_output.FormulaSmilesGroup("C2H0", 2, 0, []),
         ]
 
         cells = layout.build_structure_cells(groups)
@@ -44,8 +44,8 @@ class PdfExportTests(unittest.TestCase):
     )
     def test_pdf_export_smoke(self):
         groups = [
-            generation_pipeline.FormulaSmilesGroup("CH4", 1, 4, ["C"]),
-            generation_pipeline.FormulaSmilesGroup("bad", 0, 0, ["not-a-smiles"]),
+            generation_output.FormulaSmilesGroup("CH4", 1, 4, ["C"]),
+            generation_output.FormulaSmilesGroup("bad", 0, 0, ["not-a-smiles"]),
         ]
 
         with tempfile.TemporaryDirectory() as tmpdir:

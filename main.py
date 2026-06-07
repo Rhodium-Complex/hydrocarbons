@@ -15,14 +15,21 @@ def main(
     include_stereo=False,
 ):
     """Generate hydrocarbon structures and optionally return their SMILES strings."""
-    return generation_pipeline.run_generation(
+    if include_smiles:
+        return generation_pipeline.run_generation_smiles_groups(
+            min_carbon=min_carbon,
+            max_carbon=max_carbon,
+            workers=workers,
+            include_stereo=include_stereo,
+            log_step=generation_pipeline.print_step_result,
+        )
+    generation_pipeline.run_generation(
         min_carbon=min_carbon,
         max_carbon=max_carbon,
         workers=workers,
-        include_smiles=include_smiles,
-        include_stereo=include_stereo,
         log_step=generation_pipeline.print_step_result,
     )
+    return None
 
 
 def parse_args():
@@ -45,5 +52,3 @@ if __name__ == "__main__":
         include_smiles=not args.no_smiles,
         include_stereo=args.include_stereo,
     )
-
-

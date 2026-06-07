@@ -28,13 +28,20 @@ def benchmark_pipeline(
     if trace_memory:
         tracemalloc.start()
     try:
-        generation_pipeline.run_generation(
-            min_carbon=min_carbon,
-            max_carbon=max_carbon,
-            workers=workers,
-            include_smiles=include_smiles,
-            log_step=log_step,
-        )
+        if include_smiles:
+            generation_pipeline.run_generation_smiles_groups(
+                min_carbon=min_carbon,
+                max_carbon=max_carbon,
+                workers=workers,
+                log_step=log_step,
+            )
+        else:
+            generation_pipeline.run_generation(
+                min_carbon=min_carbon,
+                max_carbon=max_carbon,
+                workers=workers,
+                log_step=log_step,
+            )
     finally:
         if trace_memory:
             tracemalloc.stop()

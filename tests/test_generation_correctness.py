@@ -140,7 +140,6 @@ class GenerationCorrectnessTests(unittest.TestCase):
             min_carbon=2,
             max_carbon=3,
             workers=2,
-            include_smiles=False,
             log_step=lambda result: observed_counts.append(
                 (result.carbon_count, result.hydrogen_count, result.count)
             ),
@@ -160,19 +159,6 @@ class GenerationCorrectnessTests(unittest.TestCase):
                 (3, 0, 1),
             ],
         )
-
-    def test_pipeline_smiles_output_keeps_formula_separators(self):
-        """Test that flat SMILES output keeps downstream formula group markers."""
-        smiles_results = generation_pipeline.run_generation(
-            min_carbon=2,
-            max_carbon=2,
-            workers=1,
-            include_smiles=True,
-        )
-
-        self.assertEqual(smiles_results[:4], ["N#N", "N#N", "N#N", "C"])
-        self.assertEqual(smiles_results[4], "N#N")
-        self.assertIn("CC", smiles_results)
 
     def test_structured_smiles_groups_c2(self):
         """Test grouped SMILES output for B5 PDF export."""
@@ -358,7 +344,6 @@ class GenerationCorrectnessTests(unittest.TestCase):
                 min_carbon=2,
                 max_carbon=2,
                 workers=1,
-                include_smiles=False,
                 log_step=lambda result: observed_counts.append(
                     (result.carbon_count, result.hydrogen_count, result.count)
                 ),

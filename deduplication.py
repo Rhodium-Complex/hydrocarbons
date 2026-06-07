@@ -15,10 +15,12 @@ def unique_mols(
     """Yield structurally unique molecules from an iterable of molecules."""
     unique_molecule_records = {}
     seen_labeled_molecules = set()
+    take = np.take
     for molecule_obj in molecule_matrix:
         molecule_fingerprint = molecule_obj.fingerprint
         bonds_for_keys = np.ascontiguousarray(molecule_obj.bonds, dtype=np.uint8)
-        labeled_key = (len(molecule_obj), bonds_for_keys.tobytes())
+        atom_count = len(molecule_obj)
+        labeled_key = (atom_count, bonds_for_keys.tobytes())
         if labeled_key in seen_labeled_molecules:
             continue
         seen_labeled_molecules.add(labeled_key)
@@ -31,18 +33,19 @@ def unique_mols(
         canonical_permutation = tuple(itertools.chain.from_iterable(bond_fingerprints))
 
         if molecule_fingerprint not in unique_molecule_records:
-            canonical_key = isomorphism.permuted_matrix_key(
-                bonds_for_keys,
+            canonical_key = take(
+                take(bonds_for_keys, canonical_permutation, axis=0),
                 canonical_permutation,
-            )[1]
+                axis=1,
+            ).tobytes()
             unique_molecule_records[molecule_fingerprint] = {
-                len(molecule_obj): {canonical_key}
+                atom_count: {canonical_key}
             }
             yield molecule_obj
             continue
 
         record_keys = unique_molecule_records[molecule_fingerprint].setdefault(
-            len(molecule_obj),
+            atom_count,
             set(),
         )
         if isomorphism.has_permutation_match(
@@ -52,9 +55,10 @@ def unique_mols(
         ):
             continue
 
-        canonical_key = isomorphism.permuted_matrix_key(
-            bonds_for_keys,
+        canonical_key = take(
+            take(bonds_for_keys, canonical_permutation, axis=0),
             canonical_permutation,
-        )[1]
+            axis=1,
+        ).tobytes()
         record_keys.add(canonical_key)
         yield molecule_obj

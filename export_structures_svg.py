@@ -1,7 +1,6 @@
 """Export generated hydrocarbon structures to editable B5 SVG pages."""
 from __future__ import annotations
 
-import argparse
 import html
 import importlib
 import re
@@ -10,7 +9,6 @@ import textwrap
 from typing import Any
 
 import generation_output
-import generation_pipeline
 import structure_export_layout as layout
 
 PAGE_WIDTH_MM = 176
@@ -178,35 +176,3 @@ def export_formula_smiles_svg_pages(
         output_paths.append(output_path)
 
     return output_paths
-
-
-def parse_args():
-    """Parse command line arguments for B5 SVG export."""
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--min-carbon", type=int, default=2)
-    parser.add_argument("--max-carbon", type=int, default=8)
-    parser.add_argument("--workers", type=int, default=None)
-    parser.add_argument("--output-prefix", type=Path, default=DEFAULT_SVG_OUTPUT_PREFIX)
-    parser.add_argument("--include-stereo", action="store_true")
-    return parser.parse_args()
-
-
-def main() -> None:
-    """Generate structures and export them to B5 SVG pages."""
-    args = parse_args()
-    groups = generation_pipeline.run_export_smiles_groups(
-        min_carbon=args.min_carbon,
-        max_carbon=args.max_carbon,
-        workers=args.workers,
-        include_stereo=args.include_stereo,
-    )
-    try:
-        output_paths = export_formula_smiles_svg_pages(groups, args.output_prefix)
-    except RuntimeError as exc:
-        raise SystemExit(str(exc)) from exc
-    for output_path in output_paths:
-        print(f"wrote {output_path}", flush=True)
-
-
-if __name__ == "__main__":
-    main()

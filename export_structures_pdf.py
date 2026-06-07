@@ -1,7 +1,6 @@
 """Export generated hydrocarbon structures to a B5 PDF grid."""
 from __future__ import annotations
 
-import argparse
 from io import BytesIO
 import importlib
 from pathlib import Path
@@ -9,7 +8,6 @@ import textwrap
 from typing import Any
 
 import generation_output
-import generation_pipeline
 import structure_export_layout as layout
 
 DEFAULT_OUTPUT_DIR = Path("outputs")
@@ -127,34 +125,3 @@ def export_formula_smiles_pdf(
         )
 
     pdf.save()
-
-
-def parse_args():
-    """Parse command line arguments for B5 PDF export."""
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--min-carbon", type=int, default=2)
-    parser.add_argument("--max-carbon", type=int, default=8)
-    parser.add_argument("--workers", type=int, default=None)
-    parser.add_argument("--output", type=Path, default=DEFAULT_PDF_OUTPUT)
-    parser.add_argument("--include-stereo", action="store_true")
-    return parser.parse_args()
-
-
-def main() -> None:
-    """Generate structures and export them to a B5 PDF."""
-    args = parse_args()
-    groups = generation_pipeline.run_export_smiles_groups(
-        min_carbon=args.min_carbon,
-        max_carbon=args.max_carbon,
-        workers=args.workers,
-        include_stereo=args.include_stereo,
-    )
-    try:
-        export_formula_smiles_pdf(groups, args.output)
-    except RuntimeError as exc:
-        raise SystemExit(str(exc)) from exc
-    print(f"wrote {args.output}", flush=True)
-
-
-if __name__ == "__main__":
-    main()

@@ -34,17 +34,17 @@ For E/Z-aware SMILES output, enable stereo expansion:
 Export generated structures to a B5 PDF grid:
 
 ```powershell
-.\.venv\Scripts\python.exe -u export_structures_pdf.py --max-carbon 8 --workers 4
+.\.venv\Scripts\python.exe -u main.py --max-carbon 8 --workers 4 --export pdf
 ```
 
 Export editable B5 SVG pages:
 
 ```powershell
-.\.venv\Scripts\python.exe -u export_structures_svg.py --max-carbon 8 --workers 4
+.\.venv\Scripts\python.exe -u main.py --max-carbon 8 --workers 4 --export svg
 ```
 
 By default, PDF and SVG files are written under `outputs/`, which is ignored by Git.
-The PDF and SVG exporters also accept `--include-stereo`, `--output`, and `--output-prefix`.
+Export also accepts `--include-stereo`, `--output`, and `--output-prefix`.
 
 The PDF export requires the optional `pdf` dependencies.
 

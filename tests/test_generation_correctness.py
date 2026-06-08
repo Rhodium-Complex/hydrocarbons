@@ -55,12 +55,30 @@ class GenerationCorrectnessTests(unittest.TestCase):
 
     def test_single_bond_generation_has_no_self_loops(self):
         """Test that the generated single-bond adjacency matrices do not contain self-loops."""
-        for combination in ([2, 2], [2, 2, 2]):
+        for combination in ([2, 2], [2, 2, 2], [3, 3, 2, 2, 1, 1, 1, 1]):
             with self.subTest(combination=combination):
                 for bonds in structure_generator.create_single_bonds_map(
                     np.array(combination)
                 ):
                     self.assertTrue(np.all(np.diag(bonds) == 0))
+
+    def test_single_bond_generation_yields_connected_degree_matches(self):
+        """Test that single-bond candidates are connected and match requested degrees."""
+        for combination in ([2, 1, 1], [3, 3, 2, 2, 1, 1, 1, 1]):
+            with self.subTest(combination=combination):
+                requested_degrees = np.array(combination)
+                for bonds in structure_generator.create_single_bonds_map(
+                    requested_degrees
+                ):
+                    self.assertTrue(graph_utils.is_connected_graph(bonds))
+                    np.testing.assert_array_equal(bonds.sum(axis=0), requested_degrees)
+
+    def test_single_bond_generation_omits_disconnected_degree_patterns(self):
+        """Test that degree patterns with no connected realization yield no candidates."""
+        self.assertEqual(
+            list(structure_generator.create_single_bonds_map(np.array([1, 1, 1, 1]))),
+            [],
+        )
 
     def test_unique_mols_yields_each_input_at_most_once(self):
         """Test that the unique_mols function returns each input molecule at most once."""
@@ -68,7 +86,6 @@ class GenerationCorrectnessTests(unittest.TestCase):
         candidate_mols = [
             graph_utils.canonicalize(candidate)
             for candidate in structure_generator.create_single_bonds_map(combination)
-            if graph_utils.is_connected_graph(candidate)
         ]
         unique_candidates = np.unique(candidate_mols, axis=0)
         unique = list(
@@ -125,9 +142,6 @@ class GenerationCorrectnessTests(unittest.TestCase):
         """Test that canonicalization does not drop vertices for C11H24 candidates."""
         for combination in structure_generator.build_carbon_hydrogen_combination(11, 24):
             for candidate in structure_generator.create_single_bonds_map(combination):
-                if not graph_utils.is_connected_graph(candidate):
-                    continue
-
                 canonical_candidate = graph_utils.canonicalize(candidate)
 
                 self.assertEqual(canonical_candidate.shape, candidate.shape)

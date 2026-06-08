@@ -41,21 +41,22 @@ def build_carbon_hydrogen_combination(
 
 
 def create_single_bonds_map(
-    carbon_type_list: list | np.ndarray,
+    single_bond_degrees: np.ndarray,
 ) -> Generator[np.ndarray, None, None]:
-    """Generate single-bond adjacency matrices for a carbon valence pattern."""
+    """Generate connected single-bond adjacency matrices for a degree pattern."""
 
     def generate_child_nodes(
         adjacency_matrix,
-        bond_degrees,
-        visitable_nodes,
+        remaining_degrees,
+        equivalent_degree_flags,
         candidate_start_index=0,
     ) -> Generator[np.ndarray, None, None]:
         """Recursively add valid single bonds to the adjacency matrix."""
-        atom_count = len(bond_degrees)
-        unprocessed = np.where(bond_degrees > 0)[0]
+        atom_count = len(remaining_degrees)
+        unprocessed = np.where(remaining_degrees > 0)[0]
         if len(unprocessed) == 0:
-            yield adjacency_matrix
+            if graph_utils.is_connected_graph(adjacency_matrix):
+                yield adjacency_matrix
             return
         next_node_index = unprocessed[0]
 
@@ -68,60 +69,62 @@ def create_single_bonds_map(
                 continue
             if adjacency_matrix[bond_candidate_index][next_node_index] == 1:
                 continue
-            if bond_degrees[bond_candidate_index] == 0:
+            if remaining_degrees[bond_candidate_index] == 0:
                 continue
-            # Skip symmetric choices created by equal valence entries.
+            # Equal adjacent degree entries represent interchangeable labels at
+            # this point in the search. Once the immediate next equivalent
+            # choice has been considered, later equivalent choices would only
+            # relabel the same partial matrix and can be skipped.
             if (
-                visitable_nodes[bond_candidate_index]
+                equivalent_degree_flags[bond_candidate_index]
                 and bond_candidate_index - next_node_index > 1
             ):
                 continue
 
             # Copy only after all pruning checks pass; this path is hot.
             updated_adj_matrix = adjacency_matrix.copy()
-            updated_bond_counts = bond_degrees.copy()
-            current_visit_flags = visitable_nodes.copy()
+            updated_bond_counts = remaining_degrees.copy()
+            current_equivalent_flags = equivalent_degree_flags.copy()
 
             updated_adj_matrix[next_node_index][bond_candidate_index] = 1
             updated_adj_matrix[bond_candidate_index][next_node_index] = 1
             updated_bond_counts[next_node_index] -= 1
             updated_bond_counts[bond_candidate_index] -= 1
-            current_visit_flags[bond_candidate_index + 1] = False
+            current_equivalent_flags[bond_candidate_index + 1] = False
 
             yield from generate_child_nodes(
                 updated_adj_matrix,
                 updated_bond_counts,
-                current_visit_flags,
+                current_equivalent_flags,
                 bond_candidate_index
                 if updated_bond_counts[next_node_index]
                 else 0,
             )
 
-    num_carbon_types = len(carbon_type_list)
-    visited = (
+    atom_count = len(single_bond_degrees)
+    equivalent_degree_flags = (
         [False]
         + [
-            carbon_type_list[i + 1] == carbon_type_list[i]
-            for i in range(num_carbon_types - 1)
+            single_bond_degrees[i + 1] == single_bond_degrees[i]
+            for i in range(atom_count - 1)
         ]
         + [True]
     )
-    visited[1] = False
+    equivalent_degree_flags[1] = False
 
     yield from generate_child_nodes(
-        np.full((num_carbon_types, num_carbon_types), 0, dtype="i4"),
-        carbon_type_list,
-        visited,
+        np.full((atom_count, atom_count), 0, dtype="i4"),
+        single_bond_degrees,
+        equivalent_degree_flags,
     )
 
 
 def build_structure(input_structure):
     """Build unique molecule structures from a carbon valence pattern."""
-    # Generate connected candidates and canonicalize them before deduplication.
+    # Generate and canonicalize connected candidates before deduplication.
     candidate_mols = [
         graph_utils.canonicalize(candidate)
         for candidate in create_single_bonds_map(input_structure)
-        if graph_utils.is_connected_graph(candidate)
     ]
     # Drop duplicate labeled matrices first, then remove structural isomorphs.
     unique_mols_list = deduplication.unique_mols(

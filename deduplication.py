@@ -32,28 +32,19 @@ def unique_mols(
         ]
         canonical_permutation = tuple(itertools.chain.from_iterable(bond_fingerprints))
 
-        if molecule_fingerprint not in unique_molecule_records:
-            canonical_key = take(
-                take(bonds_for_keys, canonical_permutation, axis=0),
-                canonical_permutation,
-                axis=1,
-            ).tobytes()
-            unique_molecule_records[molecule_fingerprint] = {
-                atom_count: {canonical_key}
-            }
-            yield molecule_obj
-            continue
+        records_by_size = unique_molecule_records.get(molecule_fingerprint)
+        if records_by_size is None:
+            records_by_size = {}
+            unique_molecule_records[molecule_fingerprint] = records_by_size
 
-        record_keys = unique_molecule_records[molecule_fingerprint].setdefault(
-            atom_count,
-            set(),
-        )
-        if isomorphism.has_permutation_match(
-            bonds_for_keys,
-            bond_fingerprints,
-            record_keys,
-        ):
-            continue
+        record_keys = records_by_size.setdefault(atom_count, set())
+        if record_keys:
+            if isomorphism.has_permutation_match(
+                bonds_for_keys,
+                bond_fingerprints,
+                record_keys,
+            ):
+                continue
 
         canonical_key = take(
             take(bonds_for_keys, canonical_permutation, axis=0),

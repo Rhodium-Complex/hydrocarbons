@@ -195,40 +195,18 @@ def _structure_smiles(
     )
 
 
-def run_generation(
+def _run_generation_pipeline(
     min_carbon: int,
     max_carbon: int,
     workers: int | None = None,
-    log_step: Callable[[GenerationStepResult], None] | None = None,
-) -> None:
-    """Generate hydrocarbon structures and optionally log structure counts."""
-    for step in _iter_formula_structure_steps(min_carbon, max_carbon, workers):
-        if log_step is not None:
-            structure_count = count_structures(step.structures)
-            log_step(
-                GenerationStepResult(
-                    carbon_count=step.carbon_count,
-                    hydrogen_count=step.hydrogen_count,
-                    dehydro_seconds=step.dehydro_seconds,
-                    build_seconds=step.build_seconds,
-                    smiles_seconds=0.0,
-                    count=structure_count,
-                    total_seconds=step.dehydro_seconds + step.build_seconds,
-                )
-            )
-
-
-def run_generation_smiles_groups(
-    min_carbon: int,
-    max_carbon: int,
-    workers: int | None = None,
+    include_smiles: bool = False,
     include_methane: bool = True,
     include_stereo: bool = False,
     log_step: Callable[[GenerationStepResult], None] | None = None,
-) -> list[FormulaSmilesGroup]:
-    """Generate SMILES strings grouped by molecular formula."""
+) -> list[FormulaSmilesGroup] | None:
+    """Run the shared generation loop, optionally collecting SMILES groups."""
     formula_groups = []
-    if include_methane:
+    if include_smiles and include_methane:
         formula_groups.append(
             FormulaSmilesGroup(
                 label=format_formula_label(1, 4),
@@ -241,33 +219,40 @@ def run_generation_smiles_groups(
     with ExitStack() as stack:
         smiles_executor = None
         for step in _iter_formula_structure_steps(min_carbon, max_carbon, workers):
-            smiles_start = time.perf_counter()
             structure_count = count_structures(step.structures)
-            if (
-                smiles_executor is None
-                and _should_parallelize_stereo_smiles(
-                    structure_count,
-                    include_stereo,
-                    workers,
-                )
-            ):
-                smiles_executor = stack.enter_context(_executor_context(workers))
-            smiles = _structure_smiles(
-                step.structures,
-                include_stereo,
-                executor=smiles_executor,
-                workers=workers,
-            )
-            smiles_seconds = time.perf_counter() - smiles_start
+            smiles_seconds = 0.0
+            output_count = structure_count
 
-            formula_groups.append(
-                FormulaSmilesGroup(
-                    label=format_formula_label(step.carbon_count, step.hydrogen_count),
-                    carbon_count=step.carbon_count,
-                    hydrogen_count=step.hydrogen_count,
-                    smiles=smiles,
+            if include_smiles:
+                smiles_start = time.perf_counter()
+                if (
+                    smiles_executor is None
+                    and _should_parallelize_stereo_smiles(
+                        structure_count,
+                        include_stereo,
+                        workers,
+                    )
+                ):
+                    smiles_executor = stack.enter_context(_executor_context(workers))
+                smiles = _structure_smiles(
+                    step.structures,
+                    include_stereo,
+                    executor=smiles_executor,
+                    workers=workers,
                 )
-            )
+                smiles_seconds = time.perf_counter() - smiles_start
+                output_count = len(smiles)
+                formula_groups.append(
+                    FormulaSmilesGroup(
+                        label=format_formula_label(
+                            step.carbon_count,
+                            step.hydrogen_count,
+                        ),
+                        carbon_count=step.carbon_count,
+                        hydrogen_count=step.hydrogen_count,
+                        smiles=smiles,
+                    )
+                )
 
             if log_step is not None:
                 log_step(
@@ -277,12 +262,54 @@ def run_generation_smiles_groups(
                         dehydro_seconds=step.dehydro_seconds,
                         build_seconds=step.build_seconds,
                         smiles_seconds=smiles_seconds,
-                        count=len(smiles),
+                        count=output_count,
                         total_seconds=(
                             step.dehydro_seconds + step.build_seconds + smiles_seconds
                         ),
-                    ),
+                    )
                 )
+
+    if include_smiles:
+        return formula_groups
+    return None
+
+
+def run_generation(
+    min_carbon: int,
+    max_carbon: int,
+    workers: int | None = None,
+    log_step: Callable[[GenerationStepResult], None] | None = None,
+) -> None:
+    """Generate hydrocarbon structures and optionally log structure counts."""
+    _run_generation_pipeline(
+        min_carbon=min_carbon,
+        max_carbon=max_carbon,
+        workers=workers,
+        include_smiles=False,
+        log_step=log_step,
+    )
+
+
+def run_generation_smiles_groups(
+    min_carbon: int,
+    max_carbon: int,
+    workers: int | None = None,
+    include_methane: bool = True,
+    include_stereo: bool = False,
+    log_step: Callable[[GenerationStepResult], None] | None = None,
+) -> list[FormulaSmilesGroup]:
+    """Generate SMILES strings grouped by molecular formula."""
+    formula_groups = _run_generation_pipeline(
+        min_carbon=min_carbon,
+        max_carbon=max_carbon,
+        workers=workers,
+        include_smiles=True,
+        include_methane=include_methane,
+        include_stereo=include_stereo,
+        log_step=log_step,
+    )
+    if formula_groups is None:
+        return []
     return formula_groups
 
 

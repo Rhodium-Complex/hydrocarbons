@@ -46,6 +46,10 @@ Export editable B5 SVG pages:
 By default, PDF and SVG files are written under `outputs/`, which is ignored by Git.
 Export also accepts `--include-stereo`, `--output`, and `--output-prefix`.
 
+## 構造マップ
+`main.main()` から生成、SMILES 変換、PDF/SVG 出力までの大まかな呼び出し関係は
+[ARCHITECTURE.md](ARCHITECTURE.md) にまとめています。
+
 The PDF export requires the optional `pdf` dependencies.
 
 ```powershell

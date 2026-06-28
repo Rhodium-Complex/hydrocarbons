@@ -24,7 +24,7 @@ def _load_pdf_dependencies():
     except ImportError as exc:
         raise RuntimeError(
             "PDF export requires optional dependencies. "
-            "Install them with: pip install rdkit reportlab pillow"
+            "Install them with: pip install rdkit reportlab"
         ) from exc
     return chem, draw2d, colors, image_reader, canvas
 

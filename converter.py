@@ -1,4 +1,6 @@
 """Module for converting molecule bond matrices into SMILES-like strings."""
+import itertools
+
 import stereochemistry
 
 BOND_SYMBOLS = {
@@ -63,92 +65,119 @@ def mat2smiles(mat):
     return smiles
 
 
-def _stereo_main_path(bond_matrix, assignment, analysis):
-    single_label = assignment.single_label
-    if single_label is None:
-        return None
-
-    double_bond = analysis.double_bond_for_assignment(assignment)
-    if double_bond is None:
-        return None
-    if not double_bond.has_carbon_high_ligands:
-        return None
-
-    if (
-        bond_matrix[double_bond.high_ligand1][double_bond.atom1] != 1
-        or bond_matrix[double_bond.high_ligand2][double_bond.atom2] != 1
-    ):
-        return None
-
-    main_path = (
-        double_bond.high_ligand1,
-        double_bond.atom1,
-        double_bond.atom2,
-        double_bond.high_ligand2,
-    )
-    _atom1, _atom2, label = single_label
-    return main_path, label
-
-
 def _acyclic_stereo_smiles(mat, assignment, analysis):
+    """Encode every compatible E/Z label on an acyclic carbon skeleton."""
     bond_matrix = mat.bonds
-    if int((bond_matrix > 0).sum() // 2) != len(bond_matrix) - 1:
+    atom_count = len(bond_matrix)
+    if int((bond_matrix > 0).sum() // 2) != atom_count - 1:
         return None
 
-    path_and_label = _stereo_main_path(bond_matrix, assignment, analysis)
-    if path_and_label is None:
-        return None
-    main_path, label = path_and_label
+    double_bond_by_edge = {
+        (double_bond.atom1, double_bond.atom2): double_bond
+        for double_bond in analysis.double_bonds
+    }
+    stereo_data = []
+    preferred_next = {}
+    for atom1, atom2, label in assignment.labels:
+        double_bond = double_bond_by_edge.get((min(atom1, atom2), max(atom1, atom2)))
+        if double_bond is None or not double_bond.has_carbon_high_ligands:
+            return None
+        high1 = double_bond.high_ligand1
+        high2 = double_bond.high_ligand2
+        if bond_matrix[high1][double_bond.atom1] != 1 or bond_matrix[double_bond.atom2][high2] != 1:
+            return None
+        stereo_data.append((double_bond, label))
+        for left, right in zip(
+            (high1, double_bond.atom1, double_bond.atom2),
+            (double_bond.atom1, double_bond.atom2, high2),
+        ):
+            preferred_next.setdefault(left, right)
 
-    main_next = {
-        main_path[index]: main_path[index + 1]
-        for index in range(len(main_path) - 1)
-    }
-    main_edges = {
-        frozenset((main_path[index], main_path[index + 1]))
-        for index in range(len(main_path) - 1)
-    }
-    stereo_single_bonds = {
-        frozenset((main_path[0], main_path[1])): "/",
-        frozenset((main_path[2], main_path[3])): "/" if label == "E" else "\\",
-    }
+    first_double_bond = stereo_data[0][0]
+    root = first_double_bond.high_ligand1
+    parent = {root: None}
+    children = {atom: [] for atom in range(atom_count)}
+    stack = [root]
+    while stack:
+        atom = stack.pop()
+        for neighbor in sorted(int(value) for value in bond_matrix[atom].nonzero()[0]):
+            if neighbor == parent[atom]:
+                continue
+            if neighbor in parent:
+                return None
+            parent[neighbor] = atom
+            children[atom].append(neighbor)
+            stack.append(neighbor)
+    if len(parent) != atom_count:
+        return None
+
+    def emitted_reversed(left, right):
+        """Return whether an edge is emitted opposite to left -> right."""
+        if parent.get(right) == left:
+            return False
+        if parent.get(left) == right:
+            return True
+        raise ValueError("stereo ligand edge is not in the spanning tree")
+
+    constraints = []
+    marked_edges = set()
+    for double_bond, label in stereo_data:
+        ligand_edge1 = frozenset((double_bond.high_ligand1, double_bond.atom1))
+        ligand_edge2 = frozenset((double_bond.atom2, double_bond.high_ligand2))
+        reversed1 = emitted_reversed(double_bond.high_ligand1, double_bond.atom1)
+        reversed2 = emitted_reversed(double_bond.atom2, double_bond.high_ligand2)
+        differs = (label == "Z") ^ reversed1 ^ reversed2
+        constraints.append((ligand_edge1, ligand_edge2, differs))
+        marked_edges.update((ligand_edge1, ligand_edge2))
+
+    marks = {}
+    adjacency = {edge: [] for edge in marked_edges}
+    for edge1, edge2, differs in constraints:
+        adjacency[edge1].append((edge2, differs))
+        adjacency[edge2].append((edge1, differs))
+    for start in sorted(marked_edges, key=lambda edge: tuple(sorted(edge))):
+        if start in marks:
+            continue
+        marks[start] = False
+        pending = [start]
+        while pending:
+            edge = pending.pop()
+            for other, differs in adjacency[edge]:
+                expected = marks[edge] ^ differs
+                if other in marks and marks[other] != expected:
+                    return None
+                if other not in marks:
+                    marks[other] = expected
+                    pending.append(other)
 
     def bond_symbol(left, right):
         edge = frozenset((left, right))
-        if edge in stereo_single_bonds:
-            return stereo_single_bonds[edge]
+        if edge in marks:
+            return "\\" if marks[edge] else "/"
         return BOND_SYMBOLS.get(bond_matrix[left][right])
 
-    def emit_atom(atom, parent=None):
+    def emit_atom(atom):
+        atom_children = children[atom]
+        continuation = preferred_next.get(atom)
+        if continuation not in atom_children:
+            continuation = atom_children[-1] if atom_children else None
+        branches = [child for child in atom_children if child != continuation]
         parts = ["C"]
-        next_main_atom = main_next.get(atom)
-        branch_neighbors = [
-            int(neighbor)
-            for neighbor in bond_matrix[atom].nonzero()[0]
-            if int(neighbor) != parent
-            and int(neighbor) != next_main_atom
-            and frozenset((atom, int(neighbor))) not in main_edges
-        ]
-        for neighbor in sorted(branch_neighbors):
-            symbol = bond_symbol(atom, neighbor)
-            if symbol is None:
+        for child in branches:
+            symbol = bond_symbol(atom, child)
+            child_text = emit_atom(child)
+            if symbol is None or child_text is None:
                 return None
-            branch = emit_atom(neighbor, atom)
-            if branch is None:
+            parts.append(f"({symbol}{child_text})")
+        if continuation is not None:
+            symbol = bond_symbol(atom, continuation)
+            child_text = emit_atom(continuation)
+            if symbol is None or child_text is None:
                 return None
-            parts.append(f"({symbol}{branch})")
-
-        if next_main_atom is not None:
-            symbol = bond_symbol(atom, next_main_atom)
-            if symbol is None:
-                return None
-            child = emit_atom(next_main_atom, atom)
-            if child is None:
-                return None
-            parts.append(symbol + child)
+            parts.append(symbol + child_text)
         return "".join(parts)
 
-    return emit_atom(main_path[0])
+    return emit_atom(root)
 
 
 def mat2stereo_smiles(mat, assignment, analysis=None):
@@ -161,6 +190,27 @@ def mat2stereo_smiles(mat, assignment, analysis=None):
     acyclic_smiles = _acyclic_stereo_smiles(mat, assignment, analysis)
     if acyclic_smiles is not None:
         return acyclic_smiles
+
+    # Preserve as much standard slash stereochemistry as possible.  A label is
+    # left in the extension only when no compatible standard rendering that
+    # includes it can be produced by the current renderer.
+    for encoded_count in range(len(assignment.labels) - 1, 0, -1):
+        for encoded_labels in itertools.combinations(assignment.labels, encoded_count):
+            partial_assignment = stereochemistry.EzAssignment(labels=encoded_labels)
+            partial_smiles = _acyclic_stereo_smiles(
+                mat,
+                partial_assignment,
+                analysis,
+            )
+            if partial_smiles is None:
+                continue
+            encoded = set(encoded_labels)
+            unresolved_suffix = "".join(
+                f" [{label}:{atom1 + 1}-{atom2 + 1}]"
+                for atom1, atom2, label in assignment.labels
+                if (atom1, atom2, label) not in encoded
+            )
+            return partial_smiles + unresolved_suffix
 
     assignment_suffix = "".join(
         f" [{label}:{atom1 + 1}-{atom2 + 1}]"

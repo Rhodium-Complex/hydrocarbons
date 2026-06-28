@@ -266,7 +266,7 @@ class GenerationCorrectnessTests(unittest.TestCase):
             for assignment in analysis.assignments
         ]
 
-        self.assertEqual(smiles, ["C/C=C/C(C)(C)", "C/C=C\\C(C)(C)"])
+        self.assertEqual(smiles, ["C/C=C/C(C)C", "C/C=C\\C(C)C"])
         self.assertTrue(all("[E:" not in text and "[Z:" not in text for text in smiles))
 
     def test_equal_ligands_do_not_create_ez_double_bond(self):
@@ -305,6 +305,48 @@ class GenerationCorrectnessTests(unittest.TestCase):
         analysis = stereochemistry.analyze_ez(octadiene)
         self.assertEqual(len(analysis.double_bonds), 2)
         self.assertEqual(len(analysis.assignments), 4)
+        smiles = [
+            converter.mat2stereo_smiles(octadiene, assignment, analysis)
+            for assignment in analysis.assignments
+        ]
+        self.assertEqual(
+            smiles,
+            [
+                "C/C=C/C/C=C/CC",
+                "C/C=C/C/C=C\\CC",
+                "C/C=C\\C/C=C/CC",
+                "C/C=C\\C/C=C\\CC",
+            ],
+        )
+        self.assertTrue(all("[E:" not in text and "[Z:" not in text for text in smiles))
+
+    def test_branched_diene_keeps_standard_slash_stereo(self):
+        """Test that branching does not force multiple E/Z labels into the suffix."""
+        bonds = np.zeros((9, 9), dtype=int)
+        for atom1, atom2, order in (
+            (0, 1, 1),
+            (1, 2, 2),
+            (2, 3, 1),
+            (3, 4, 1),
+            (4, 5, 2),
+            (5, 6, 1),
+            (6, 7, 1),
+            (3, 8, 1),
+        ):
+            bonds[atom1][atom2] = order
+            bonds[atom2][atom1] = order
+        branched_diene = molecule.Molecule(bonds)
+
+        analysis = stereochemistry.analyze_ez(branched_diene)
+        smiles = [
+            converter.mat2stereo_smiles(branched_diene, assignment, analysis)
+            for assignment in analysis.assignments
+        ]
+
+        self.assertEqual(len(analysis.double_bonds), 2)
+        self.assertEqual(len(smiles), 4)
+        self.assertTrue(all("/" in text or "\\" in text for text in smiles))
+        self.assertTrue(all("[E:" not in text and "[Z:" not in text for text in smiles))
 
     def test_cyclohexatriene_double_bonds_are_formal_ez_candidates(self):
         """Test that ring double bonds are treated as formal E/Z candidates."""

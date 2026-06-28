@@ -365,6 +365,31 @@ class GenerationCorrectnessTests(unittest.TestCase):
 
         self.assertEqual(len(stereochemistry.analyze_ez(cyclohexatriene).double_bonds), 3)
 
+    def test_exocyclic_ez_is_embedded_when_ring_ez_uses_suffix(self):
+        """Test that a ring does not prevent encoding an external alkene."""
+        molecule_obj = molecule.Molecule(
+            np.array(
+                [
+                    [0, 1, 0, 0, 0, 0],
+                    [1, 0, 2, 0, 0, 0],
+                    [0, 2, 0, 1, 0, 0],
+                    [0, 0, 1, 0, 1, 1],
+                    [0, 0, 0, 1, 0, 2],
+                    [0, 0, 0, 1, 2, 0],
+                ]
+            )
+        )
+        analysis = stereochemistry.analyze_ez(molecule_obj)
+        assignment = next(
+            item
+            for item in analysis.assignments
+            if item.labels == ((1, 2, "Z"), (4, 5, "Z"))
+        )
+
+        smiles = converter.mat2stereo_smiles(molecule_obj, assignment, analysis)
+
+        self.assertEqual(smiles, "C/C=C\\C1C=C1 [Z:5-6]")
+
     def test_generation_stereo_flag_preserves_default_outputs(self):
         """Test that stereo output is opt-in and default generation remains unchanged."""
         default_groups = generation_pipeline.run_generation_smiles_groups(

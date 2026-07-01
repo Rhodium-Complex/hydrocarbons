@@ -160,6 +160,26 @@ def _high_priority_ligand(
     return ranked[-1][1]
 
 
+def _locally_resolved_high_ligand(ligands: list[int]) -> tuple[bool, int | None]:
+    """Resolve ligand identity without graph refinement when it is unambiguous.
+
+    Hydrocarbon alkene ends with one explicit carbon and one implicit hydrogen
+    always select the carbon.  Missing or all-hydrogen ligand sets can also be
+    rejected locally.  Two explicit carbon ligands still require graph-based
+    equivalence refinement.
+    """
+    if len(ligands) < 2:
+        return True, None
+    carbon_ligands = [
+        ligand for ligand in ligands if ligand != HYDROGEN_LIGAND
+    ]
+    if not carbon_ligands:
+        return True, None
+    if len(ligands) == 2 and len(carbon_ligands) == 1:
+        return True, carbon_ligands[0]
+    return False, None
+
+
 def _find_ez_double_bonds_for_bonds(bonds: np.ndarray) -> tuple[EzDoubleBond, ...]:
     hydrogens = molecule.implicit_hydrogens(bonds)
     double_bonds = []
@@ -168,14 +188,33 @@ def _find_ez_double_bonds_for_bonds(bonds: np.ndarray) -> tuple[EzDoubleBond, ..
             if bond_order != 2:
                 continue
 
+            ligands1 = _ligands_for_atom(bonds, atom1, atom2, hydrogens)
+            ligands2 = _ligands_for_atom(bonds, atom2, atom1, hydrogens)
+            resolved1, high1 = _locally_resolved_high_ligand(ligands1)
+            resolved2, high2 = _locally_resolved_high_ligand(ligands2)
+            if (resolved1 and high1 is None) or (resolved2 and high2 is None):
+                continue
+
+            if resolved1 and resolved2:
+                assert high1 is not None and high2 is not None
+                double_bonds.append(
+                    EzDoubleBond(
+                        atom1=atom1,
+                        atom2=atom2,
+                        high_ligand1=high1,
+                        high_ligand2=high2,
+                    )
+                )
+                continue
+
             blocked = bonds.copy()
             blocked[atom1][atom2] = 0
             blocked[atom2][atom1] = 0
             colors = _refined_atom_colors(blocked)
-            ligands1 = _ligands_for_atom(bonds, atom1, atom2, hydrogens)
-            ligands2 = _ligands_for_atom(bonds, atom2, atom1, hydrogens)
-            high1 = _high_priority_ligand(colors, ligands1)
-            high2 = _high_priority_ligand(colors, ligands2)
+            if not resolved1:
+                high1 = _high_priority_ligand(colors, ligands1)
+            if not resolved2:
+                high2 = _high_priority_ligand(colors, ligands2)
             if high1 is None or high2 is None:
                 continue
 

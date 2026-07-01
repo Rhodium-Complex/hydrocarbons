@@ -245,6 +245,29 @@ class GenerationCorrectnessTests(unittest.TestCase):
         self.assertEqual(len(analysis.assignments), 2)
         self.assertEqual(smiles, ["C/C=C/C", "C/C=C\\C"])
 
+    def test_simple_carbon_hydrogen_ligands_skip_graph_refinement(self):
+        """Test that locally distinct alkene ligands do not invoke WL refinement."""
+        two_butene = molecule.Molecule(
+            np.array(
+                [
+                    [0, 1, 0, 0],
+                    [1, 0, 2, 0],
+                    [0, 2, 0, 1],
+                    [0, 0, 1, 0],
+                ]
+            )
+        )
+
+        with mock.patch.object(
+            stereochemistry,
+            "_refined_atom_colors",
+            wraps=stereochemistry._refined_atom_colors,
+        ) as refined:
+            analysis = stereochemistry.analyze_ez(two_butene)
+
+        self.assertEqual(len(analysis.double_bonds), 1)
+        refined.assert_not_called()
+
     def test_branched_alkene_expands_to_slash_stereo_smiles(self):
         """Test that branched E/Z alkenes produce drawable slash SMILES."""
         methyl_pentene = molecule.Molecule(
@@ -365,8 +388,8 @@ class GenerationCorrectnessTests(unittest.TestCase):
 
         self.assertEqual(len(stereochemistry.analyze_ez(cyclohexatriene).double_bonds), 3)
 
-    def test_exocyclic_ez_is_embedded_when_ring_ez_uses_suffix(self):
-        """Test that a ring does not prevent encoding an external alkene."""
+    def test_ring_and_exocyclic_ez_are_both_embedded(self):
+        """Test that ring closures and external alkenes both carry slash stereo."""
         molecule_obj = molecule.Molecule(
             np.array(
                 [
@@ -388,7 +411,54 @@ class GenerationCorrectnessTests(unittest.TestCase):
 
         smiles = converter.mat2stereo_smiles(molecule_obj, assignment, analysis)
 
-        self.assertEqual(smiles, "C/C=C\\C1C=C1 [Z:5-6]")
+        self.assertEqual(smiles, "C/C=C\\C/1/C=C1")
+        self.assertNotIn("[Z:", smiles)
+
+    def test_conflicting_ring_constraints_fall_back_to_non_stereo_smiles(self):
+        """Test that inconsistent formal ring assignments remain visible without stereo."""
+        cyclohexatriene = molecule.Molecule(
+            np.array(
+                [
+                    [0, 2, 0, 0, 0, 1],
+                    [2, 0, 1, 0, 0, 0],
+                    [0, 1, 0, 2, 0, 0],
+                    [0, 0, 2, 0, 1, 0],
+                    [0, 0, 0, 1, 0, 2],
+                    [1, 0, 0, 0, 2, 0],
+                ]
+            )
+        )
+
+        variants = converter.mat2smiles_variants(cyclohexatriene, include_stereo=True)
+
+        self.assertEqual(len(variants), 4)
+        non_stereo = converter.mat2smiles_variants(cyclohexatriene)[0]
+        self.assertEqual(variants[1], non_stereo)
+        self.assertEqual(variants[3], non_stereo)
+        self.assertTrue(all("[E:" not in text and "[Z:" not in text for text in variants))
+
+    def test_ring_stereo_survives_atom_renumbering(self):
+        """Test that ring slash constraints remain representable after renumbering."""
+        bonds = np.array(
+            [
+                [0, 1, 0, 0, 0, 0],
+                [1, 0, 2, 0, 0, 0],
+                [0, 2, 0, 1, 0, 0],
+                [0, 0, 1, 0, 1, 1],
+                [0, 0, 0, 1, 0, 2],
+                [0, 0, 0, 1, 2, 0],
+            ]
+        )
+        permutation = [3, 5, 1, 4, 0, 2]
+        original = molecule.Molecule(bonds)
+        renumbered = molecule.Molecule(bonds[np.ix_(permutation, permutation)])
+
+        original_variants = converter.mat2smiles_variants(original, include_stereo=True)
+        renumbered_variants = converter.mat2smiles_variants(renumbered, include_stereo=True)
+
+        self.assertEqual(len(original_variants), len(renumbered_variants))
+        self.assertTrue(all(original_variants))
+        self.assertTrue(all(renumbered_variants))
 
     def test_generation_stereo_flag_preserves_default_outputs(self):
         """Test that stereo output is opt-in and default generation remains unchanged."""

@@ -7,7 +7,7 @@ import stereochemistry
 BOND_SYMBOLS = {1: "", 2: "=", 3: "#"}
 
 
-def _mat2smiles(mat, directional_bonds=None):
+def _render_smiles(mat, directional_bonds=None):
     """Render a bond matrix, optionally marking selected single bonds."""
     bonds = mat.bonds
     directional_bonds = directional_bonds or {}
@@ -55,11 +55,6 @@ def _mat2smiles(mat, directional_bonds=None):
         smiles = smiles.replace(token, replacement, 2)
         ring_number += 1
     return smiles
-
-
-def mat2smiles(mat):
-    """Convert a molecule bond matrix into a compact SMILES-like string."""
-    return _mat2smiles(mat)
 
 
 def _stereo_data(mat, labels, analysis):
@@ -214,7 +209,7 @@ def _base_tree_stereo_smiles(mat, assignment, analysis):
     )
     if directional_bonds is None:
         return None
-    return _mat2smiles(mat, directional_bonds)
+    return _render_smiles(mat, directional_bonds)
 
 
 def _standard_stereo_smiles(mat, assignment, analysis):
@@ -235,7 +230,7 @@ def _assignment_suffix(labels):
 def mat2stereo_smiles(mat, assignment, analysis=None):
     """Convert a molecule and E/Z assignment to a stereo-aware SMILES-like string."""
     if not assignment.labels:
-        return mat2smiles(mat)
+        return _render_smiles(mat)
     analysis = analysis or stereochemistry.analyze_ez(mat)
 
     labels = assignment.labels
@@ -248,13 +243,13 @@ def mat2stereo_smiles(mat, assignment, analysis=None):
             encoded = set(encoded_labels)
             unresolved = tuple(label for label in labels if label not in encoded)
             return smiles + _assignment_suffix(unresolved)
-    return mat2smiles(mat) + _assignment_suffix(labels)
+    return _render_smiles(mat) + _assignment_suffix(labels)
 
 
 def mat2smiles_variants(mat, include_stereo: bool = False) -> list[str]:
     """Return one or more SMILES outputs for a molecule."""
     if not include_stereo:
-        return [mat2smiles(mat)]
+        return [_render_smiles(mat)]
     analysis = stereochemistry.analyze_ez(mat)
     return [
         mat2stereo_smiles(mat, assignment, analysis)

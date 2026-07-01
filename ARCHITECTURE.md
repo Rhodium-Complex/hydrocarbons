@@ -60,7 +60,7 @@ generation_pipeline._run_generation_pipeline(...)
 generation_pipeline._run_generation_pipeline(include_smiles=True, ...)
   -> _structure_smiles(...)
      -> converter.mat2smiles_variants(...)
-        -> converter.mat2smiles(...)
+        -> converter._render_smiles(...)
         -> stereochemistry.analyze_ez(...)      [include_stereo=True のときだけ]
         -> converter.mat2stereo_smiles(...)     [include_stereo=True のときだけ]
 ```
@@ -129,7 +129,7 @@ molecule_transformations.unique_dehydro_mols(structures)
 ```text
 generation_pipeline._structure_smiles(...)
   -> converter.mat2smiles_variants(...)
-     -> converter.mat2smiles(...)
+     -> converter._render_smiles(...)
 ```
 
 E/Z 立体を含める場合は、追加で stereochemistry を使います。

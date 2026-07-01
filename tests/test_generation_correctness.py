@@ -129,7 +129,7 @@ class GenerationCorrectnessTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(converter.mat2smiles(cyclopropane), "C1CC1")
+        self.assertEqual(converter.mat2smiles_variants(cyclopropane), ["C1CC1"])
 
     def test_high_symmetry_tetravalent_c9_generation(self):
         """Test that the generation of structures with 9 carbons and 4 hydrogens terminates and 

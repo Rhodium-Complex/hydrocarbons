@@ -1,5 +1,6 @@
 """ test cases to verify the correctness of the hydrocarbon generation pipeline. """
 import importlib.util
+import itertools
 import unittest
 from unittest import mock
 
@@ -504,15 +505,128 @@ class GenerationCorrectnessTests(unittest.TestCase):
         self.assertTrue(any("[C@H]" in value for value in smiles))
         self.assertTrue(any("[C@@H]" in value for value in smiles))
 
-    def test_equal_tetrahedral_ligands_are_not_stereogenic(self):
+    def test_equal_tetrahedral_ligands_remain_inactive(self):
         bonds = np.zeros((5, 5), dtype=int)
         for atom1, atom2 in ((0, 1), (0, 2), (0, 3), (3, 4)):
             bonds[atom1][atom2] = bonds[atom2][atom1] = 1
         molecule_obj = molecule.Molecule(bonds)
 
         analysis = stereochemistry.analyze_chiral(molecule_obj)
+        smiles = converter.mat2smiles_variants(molecule_obj, False, True)
 
-        self.assertEqual(analysis.tetrahedral_centers, ())
+        self.assertEqual(len(analysis.tetrahedral_centers), 1)
+        self.assertEqual(analysis.assignments[0].active_centers, frozenset())
+        self.assertEqual(len(smiles), 1)
+        self.assertNotIn("@", smiles[0])
+
+    def test_odd_stabilizer_makes_tetrahedral_center_inactive(self):
+        bonds = np.zeros((5, 5), dtype=int)
+        for atom1, atom2 in ((0, 1), (0, 2), (0, 3), (3, 4)):
+            bonds[atom1][atom2] = bonds[atom2][atom1] = 1
+        analysis = stereochemistry.analyze_chiral(molecule.Molecule(bonds))
+        assignment = analysis.assignments[0]
+
+        active = stereochemistry.active_chiral_centers(
+            bonds,
+            analysis,
+            assignment,
+        )
+
+        self.assertGreater(len(analysis.automorphisms), 1)
+        self.assertNotIn(("T", analysis.tetrahedral_centers[0].atom), active)
+
+    def test_ez_labels_filter_automorphisms_for_chiral_enumeration(self):
+        bonds = np.zeros((8, 8), dtype=int)
+        centers = (
+            stereochemistry.TetrahedralCenter(0, (-1, 2, 3, 4), 1),
+            stereochemistry.TetrahedralCenter(1, (-1, 5, 6, 7), 1),
+        )
+        identity = tuple(range(8))
+        swap_halves = (1, 0, 5, 6, 7, 2, 3, 4)
+        analysis = stereochemistry.ChiralAnalysis(
+            tetrahedral_centers=centers,
+            allene_centers=(),
+            assignments=(),
+            automorphisms=(identity, swap_halves),
+        )
+        same_labels = stereochemistry.EzAssignment(((2, 3, "E"), (5, 6, "E")))
+        different_labels = stereochemistry.EzAssignment(((2, 3, "E"), (5, 6, "Z")))
+
+        symmetric = stereochemistry.chiral_assignments_for_ez(
+            bonds, analysis, same_labels
+        )
+        symmetry_broken = stereochemistry.chiral_assignments_for_ez(
+            bonds, analysis, different_labels
+        )
+
+        self.assertEqual(len(symmetric), 3)
+        self.assertEqual(len(symmetry_broken), 4)
+
+    def test_chiral_analysis_is_invariant_under_atom_renumbering(self):
+        bonds = np.zeros((8, 8), dtype=int)
+        for atom1, atom2 in (
+            (0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (2, 6), (3, 7)
+        ):
+            bonds[atom1][atom2] = bonds[atom2][atom1] = 1
+        permutation = [6, 3, 0, 7, 2, 5, 1, 4]
+
+        original = stereochemistry.analyze_chiral(molecule.Molecule(bonds))
+        renumbered = stereochemistry.analyze_chiral(
+            molecule.Molecule(bonds[np.ix_(permutation, permutation)])
+        )
+
+        self.assertEqual(len(original.automorphisms), len(renumbered.automorphisms))
+        self.assertEqual(len(original.assignments), len(renumbered.assignments))
+        self.assertEqual(
+            sorted(len(item.active_centers) for item in original.assignments),
+            sorted(len(item.active_centers) for item in renumbered.assignments),
+        )
+
+    def test_configuration_dependent_center_adds_fourth_isomer(self):
+        bonds = np.array(
+            [
+                [0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+                [1, 0, 1, 0, 1, 0, 0, 0, 0, 0],
+                [0, 1, 0, 1, 0, 0, 0, 0, 0, 0],
+                [0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+                [0, 1, 0, 0, 0, 1, 1, 0, 0, 0],
+                [0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 1, 0, 0, 1, 1, 0],
+                [0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 1, 0, 0, 1],
+                [0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
+            ]
+        )
+        molecule_obj = molecule.Molecule(bonds)
+
+        analysis = stereochemistry.analyze_chiral(molecule_obj)
+        smiles = converter.mat2smiles_variants(molecule_obj, False, True)
+
+        self.assertEqual(len(analysis.tetrahedral_centers), 3)
+        self.assertEqual(len(smiles), 4)
+        self.assertEqual(sum(value.count("[C@") == 3 for value in smiles), 2)
+        self.assertEqual(sum(value.count("[C@") == 2 for value in smiles), 2)
+
+    def test_alkane_stereoisomer_counts_match_oeis_a000628(self):
+        expected = (1, 1, 1, 1, 2, 3, 5, 11, 24, 55, 136, 345, 900)
+        actual = [1]
+        for carbon_count in range(1, 13):
+            if carbon_count == 1:
+                count = 1
+            else:
+                groups = []
+                for combination in structure_generator.build_carbon_hydrogen_combination(
+                    carbon_count,
+                    2 * carbon_count + 2,
+                ):
+                    groups += structure_generator.build_structure(combination)
+                count = sum(
+                    len(converter.mat2smiles_variants(item, False, True))
+                    for item in itertools.chain.from_iterable(groups)
+                )
+            actual.append(count)
+
+        self.assertEqual(tuple(actual), expected)
 
     def test_symmetric_two_center_molecule_has_three_assignments(self):
         bonds = np.zeros((8, 8), dtype=int)

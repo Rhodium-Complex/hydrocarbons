@@ -210,10 +210,10 @@ def _stereo_traversal(bonds, root):
     }
     rank = {atom: index for index, atom in enumerate(preorder)}
     closure_edges = []
-    for atom1 in range(len(bonds)):
-        for atom2 in range(atom1 + 1, len(bonds)):
+    for atom1, row in enumerate(bonds):
+        for atom2, bond_order in enumerate(row[atom1 + 1 :], start=atom1 + 1):
             edge = frozenset((atom1, atom2))
-            if bonds[atom1][atom2] and edge not in tree_edges:
+            if bond_order and edge not in tree_edges:
                 closure_edges.append(edge)
     return parent, children, rank, tree_edges, closure_edges
 
@@ -247,7 +247,7 @@ def _render_cyclic_stereo(mat, traversal, directional_bonds, atom_tokens=None):
 
 def _lexical_neighbors(atom, traversal, hydrogen_count=0):
     """Return neighbors in the order used for atom-centered SMILES chirality."""
-    parent, children, rank, _tree_edges, closure_edges = traversal
+    parent, children, _, _tree_edges, closure_edges = traversal
     ordered = [stereochemistry.HYDROGEN_LIGAND] * hydrogen_count
     if parent[atom] is not None:
         ordered.append(parent[atom])
@@ -261,11 +261,19 @@ def _lexical_neighbors(atom, traversal, hydrogen_count=0):
     return tuple(ordered)
 
 
-def _chiral_atom_tokens(chiral_analysis, chiral_assignment, traversal):
+def _chiral_atom_tokens(
+    chiral_analysis,
+    chiral_assignment,
+    traversal,
+    active_centers=None,
+):
     """Resolve abstract configurations to traversal-relative atom tokens."""
     labels = {(kind, atom): bit for kind, atom, bit in chiral_assignment.labels}
+    active_centers = active_centers or chiral_assignment.active_centers
     tokens = {}
     for center in chiral_analysis.tetrahedral_centers:
+        if ("T", center.atom) not in active_centers:
+            continue
         bit = labels.get(("T", center.atom))
         if bit is None:
             continue
@@ -282,6 +290,8 @@ def _chiral_atom_tokens(chiral_analysis, chiral_assignment, traversal):
         tokens[center.atom] = f"[C{marker}{hydrogen}]"
 
     for center in chiral_analysis.allene_centers:
+        if ("A", center.center_atom) not in active_centers:
+            continue
         bit = labels.get(("A", center.center_atom))
         if bit is None:
             continue
@@ -318,9 +328,10 @@ def _combined_stereo_smiles(
     chiral_analysis,
     ez_assignment=None,
     ez_analysis=None,
+    traversal=None,
 ):
     """Render atom-centered stereo and any representable E/Z constraints."""
-    traversal = _stereo_traversal(mat.bonds, 0)
+    traversal = traversal or _stereo_traversal(mat.bonds, 0)
     if traversal is None:
         return _render_smiles(mat)
     parent, _children, rank, tree_edges, _closure_edges = traversal
@@ -337,7 +348,22 @@ def _combined_stereo_smiles(
             solved = _solve_directional_bonds(stereo_data, edge_reversed)
             if solved is not None:
                 directional_bonds = solved
-    atom_tokens = _chiral_atom_tokens(chiral_analysis, chiral_assignment, traversal)
+    active_centers = (
+        stereochemistry.active_chiral_centers(
+            mat.bonds,
+            chiral_analysis,
+            chiral_assignment,
+            ez_assignment,
+        )
+        if ez_assignment is not None and ez_assignment.labels
+        else chiral_assignment.active_centers
+    )
+    atom_tokens = _chiral_atom_tokens(
+        chiral_analysis,
+        chiral_assignment,
+        traversal,
+        active_centers,
+    )
     return _render_cyclic_stereo(
         mat,
         traversal,
@@ -420,14 +446,21 @@ def mat2smiles_variants(
         )
         variants = []
         seen = set()
+        traversal = _stereo_traversal(mat.bonds, 0)
         for ez_assignment in ez_assignments:
-            for chiral_assignment in chiral_analysis.assignments:
+            chiral_assignments = stereochemistry.chiral_assignments_for_ez(
+                mat.bonds,
+                chiral_analysis,
+                ez_assignment,
+            )
+            for chiral_assignment in chiral_assignments:
                 smiles = _combined_stereo_smiles(
                     mat,
                     chiral_assignment,
                     chiral_analysis,
                     ez_assignment,
                     ez_analysis,
+                    traversal,
                 )
                 if smiles in seen:
                     continue

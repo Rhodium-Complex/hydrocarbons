@@ -44,6 +44,12 @@ The binary configurations are enumeration labels, not guaranteed CIP R/S or
 Ra/Sa names. Tetrahedral carbon and even cumulene (allene-like) stereochemistry
 are supported; helicity and conformational stereochemistry are not.
 
+Tetrahedral enumeration includes configuration-dependent centers: a CH or
+quaternary carbon may become stereogenic only after neighboring configurations
+are assigned. Symmetry is evaluated on the fully decorated molecular graph, so
+inactive equal-ligand candidates do not receive an `@` marker. For acyclic
+saturated hydrocarbons, counts are regression-tested against OEIS A000628.
+
 Export generated structures to a B5 PDF grid:
 
 ```powershell

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 import itertools
 
 import numpy as np
@@ -101,6 +102,7 @@ class ChiralAssignment:
     """Binary configurations for tetrahedral and allene-like centers."""
 
     labels: tuple[ChiralLabel, ...]
+    active_centers: frozenset[tuple[str, int]] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -110,6 +112,7 @@ class ChiralAnalysis:
     tetrahedral_centers: tuple[TetrahedralCenter, ...]
     allene_centers: tuple[AlleneCenter, ...]
     assignments: tuple[ChiralAssignment, ...]
+    automorphisms: tuple[tuple[int, ...], ...] = ()
 
 
 def _compressed_color_ids(signatures: list[tuple]) -> list[int]:
@@ -357,14 +360,16 @@ def _find_tetrahedral_centers(bonds: np.ndarray) -> tuple[TetrahedralCenter, ...
             continue
         if any(bonds[atom][neighbor] != 1 for neighbor in neighbors):
             continue
-        blocked = bonds.copy()
-        blocked[atom, :] = 0
-        blocked[:, atom] = 0
-        colors = _refined_atom_colors(blocked)
         ligands = neighbors + [HYDROGEN_LIGAND] * hydrogen_count
-        ordered = _ligand_order(colors, ligands)
-        if ordered is None:
-            continue
+        ordered = tuple(
+            sorted(
+                ligands,
+                key=lambda ligand: (
+                    ligand != HYDROGEN_LIGAND,
+                    ligand,
+                ),
+            )
+        )
         centers.append(
             TetrahedralCenter(atom, ordered, hydrogen_count)  # type: ignore[arg-type]
         )
@@ -449,14 +454,13 @@ def _find_allene_centers(bonds: np.ndarray) -> tuple[AlleneCenter, ...]:
     return tuple(centers)
 
 
+@lru_cache(maxsize=65536)
 def _permutation_is_odd(source: tuple[int, ...], target: tuple[int, ...]) -> bool:
-    positions = {value: index for index, value in enumerate(target)}
-    permutation = [positions[value] for value in source]
-    inversions = sum(
-        permutation[left] > permutation[right]
-        for left in range(len(permutation))
-        for right in range(left + 1, len(permutation))
-    )
+    permutation = [target.index(value) for value in source]
+    inversions = 0
+    for left, left_value in enumerate(permutation):
+        for right_value in permutation[left + 1 :]:
+            inversions += left_value > right_value
     return bool(inversions % 2)
 
 
@@ -468,6 +472,7 @@ def _enumerate_chiral_assignments(
     bonds: np.ndarray,
     tetrahedral_centers: tuple[TetrahedralCenter, ...],
     allene_centers: tuple[AlleneCenter, ...],
+    automorphisms: tuple[tuple[int, ...], ...] | None = None,
 ) -> tuple[ChiralAssignment, ...]:
     elements = [*(('T', center.atom) for center in tetrahedral_centers), *(
         ('A', center.center_atom) for center in allene_centers
@@ -476,27 +481,170 @@ def _enumerate_chiral_assignments(
         return (ChiralAssignment(labels=()),)
     tetra_by_atom = {center.atom: center for center in tetrahedral_centers}
     allene_by_center = {center.center_atom: center for center in allene_centers}
-    automorphisms = isomorphism.automorphisms(bonds)
+    automorphisms = automorphisms or tuple(isomorphism.automorphisms(bonds))
 
-    def mapped_key(bits, automorphism):
-        mapped = []
-        for (kind, atom), bit in zip(elements, bits):
+    def compile_action(automorphism):
+        action = []
+        for kind, atom in elements:
             mapped_atom = automorphism[atom]
             parity = False
-            if kind == 'T':
+            if kind == "T":
                 source = tetra_by_atom[atom]
-                target = tetra_by_atom.get(mapped_atom)
-                if target is None:
-                    return None
+                target = tetra_by_atom[mapped_atom]
                 mapped_ligands = tuple(
                     _map_ligand(value, automorphism) for value in source.ligands
                 )
                 parity = _permutation_is_odd(mapped_ligands, target.ligands)
             else:
                 source = allene_by_center[atom]
-                target = allene_by_center.get(mapped_atom)
-                if target is None:
-                    return None
+                target = allene_by_center[mapped_atom]
+                mapped_end = automorphism[source.path[0]]
+                target_pairs = (
+                    (target.ligands1, target.ligands2)
+                    if mapped_end == target.path[0]
+                    else (target.ligands2, target.ligands1)
+                )
+                mapped_pairs = (
+                    tuple(_map_ligand(v, automorphism) for v in source.ligands1),
+                    tuple(_map_ligand(v, automorphism) for v in source.ligands2),
+                )
+                parity = _permutation_is_odd(mapped_pairs[0], target_pairs[0]) ^ (
+                    _permutation_is_odd(mapped_pairs[1], target_pairs[1])
+                )
+            action.append((kind, mapped_atom, int(parity)))
+        return tuple(action)
+
+    actions = tuple(compile_action(automorphism) for automorphism in automorphisms)
+
+    def mapped_key(bits, action):
+        return tuple(
+            sorted(
+                (kind, mapped_atom, bit ^ parity)
+                for bit, (kind, mapped_atom, parity) in zip(bits, action)
+            )
+        )
+
+    def unique_bit_patterns():
+        seen_by_depth = [set() for _ in range(len(elements) + 1)]
+
+        def visit(bits):
+            depth = len(bits)
+            if depth == len(elements):
+                yield bits
+                return
+            prefix_ids = set(elements[: depth + 1])
+            for bit in (0, 1):
+                next_bits = bits + (bit,)
+                keys = []
+                for action in actions:
+                    key = mapped_key(next_bits, action)
+                    if {label[:2] for label in key} == prefix_ids:
+                        keys.append(key)
+                canonical_prefix = min(keys)
+                if canonical_prefix in seen_by_depth[depth + 1]:
+                    continue
+                seen_by_depth[depth + 1].add(canonical_prefix)
+                yield from visit(next_bits)
+
+        yield from visit(())
+
+    assignments = []
+    seen = set()
+    for bits in unique_bit_patterns():
+        keys = [mapped_key(bits, action) for action in actions]
+        canonical = min(keys)
+        if canonical in seen:
+            continue
+        seen.add(canonical)
+        raw_key = tuple(
+            sorted(
+                (kind, atom, bit)
+                for (kind, atom), bit in zip(elements, bits)
+            )
+        )
+        active_centers = {
+            ("A", center.center_atom) for center in allene_centers
+        }
+        for center in tetrahedral_centers:
+            other_labels = tuple(
+                label
+                for label in raw_key
+                if label[:2] != ("T", center.atom)
+            )
+            center_index = elements.index(("T", center.atom))
+            has_odd_stabilizer = any(
+                action[center_index][1] == center.atom
+                and bool(action[center_index][2])
+                and tuple(
+                    label
+                    for label in mapped_key(bits, action)
+                    if label[:2] != ("T", center.atom)
+                ) == other_labels
+                for action in actions
+            )
+            if not has_odd_stabilizer:
+                active_centers.add(("T", center.atom))
+        assignments.append(
+            ChiralAssignment(
+                labels=tuple(
+                    (kind, atom, bit) for (kind, atom), bit in zip(elements, bits)
+                ),
+                active_centers=frozenset(active_centers),
+            )
+        )
+    return tuple(assignments)
+
+
+def analyze_chiral(molecule_obj) -> ChiralAnalysis:
+    """Return tetrahedral and allene-like stereogenic elements and assignments."""
+    bonds = molecule_obj.bonds
+    tetrahedral = _find_tetrahedral_centers(bonds)
+    allenes = _find_allene_centers(bonds)
+    automorphisms = (
+        tuple(isomorphism.automorphisms(bonds))
+        if tetrahedral or allenes
+        else ()
+    )
+    return ChiralAnalysis(
+        tetrahedral_centers=tetrahedral,
+        allene_centers=allenes,
+        assignments=_enumerate_chiral_assignments(
+            bonds,
+            tetrahedral,
+            allenes,
+            automorphisms,
+        ),
+        automorphisms=automorphisms,
+    )
+
+
+def active_chiral_centers(
+    bonds: np.ndarray,
+    analysis: ChiralAnalysis,
+    assignment: ChiralAssignment,
+    ez_assignment: EzAssignment | None = None,
+) -> frozenset[tuple[str, int]]:
+    """Return centers active after all selected stereo decorations are applied."""
+    tetra_by_atom = {center.atom: center for center in analysis.tetrahedral_centers}
+    allene_by_center = {center.center_atom: center for center in analysis.allene_centers}
+    raw_labels = tuple(sorted(assignment.labels))
+    raw_ez = tuple(sorted(ez_assignment.labels)) if ez_assignment is not None else ()
+
+    def map_labels(automorphism):
+        mapped = []
+        for kind, atom, bit in assignment.labels:
+            mapped_atom = automorphism[atom]
+            parity = False
+            if kind == "T":
+                source = tetra_by_atom[atom]
+                target = tetra_by_atom[mapped_atom]
+                mapped_ligands = tuple(
+                    _map_ligand(value, automorphism) for value in source.ligands
+                )
+                parity = _permutation_is_odd(mapped_ligands, target.ligands)
+            else:
+                source = allene_by_center[atom]
+                target = allene_by_center[mapped_atom]
                 mapped_end = automorphism[source.path[0]]
                 target_pairs = (
                     (target.ligands1, target.ligands2)
@@ -513,31 +661,77 @@ def _enumerate_chiral_assignments(
             mapped.append((kind, mapped_atom, bit ^ int(parity)))
         return tuple(sorted(mapped))
 
-    assignments = []
-    seen = set()
-    for bits in itertools.product((0, 1), repeat=len(elements)):
-        keys = [mapped_key(bits, auto) for auto in automorphisms]
-        canonical = min(key for key in keys if key is not None)
-        if canonical in seen:
-            continue
-        seen.add(canonical)
-        assignments.append(
-            ChiralAssignment(
-                labels=tuple(
-                    (kind, atom, bit) for (kind, atom), bit in zip(elements, bits)
+    def map_ez(automorphism):
+        return tuple(
+            sorted(
+                (
+                    min(automorphism[atom1], automorphism[atom2]),
+                    max(automorphism[atom1], automorphism[atom2]),
+                    label,
                 )
+                for atom1, atom2, label in raw_ez
             )
         )
-    return tuple(assignments)
+
+    automorphisms = analysis.automorphisms or tuple(isomorphism.automorphisms(bonds))
+    active = {("A", center.center_atom) for center in analysis.allene_centers}
+    for center in analysis.tetrahedral_centers:
+        other_labels = tuple(
+            label for label in raw_labels if label[:2] != ("T", center.atom)
+        )
+        has_odd_stabilizer = False
+        for automorphism in automorphisms:
+            if automorphism[center.atom] != center.atom:
+                continue
+            target = tetra_by_atom[center.atom]
+            mapped_ligands = tuple(
+                _map_ligand(value, automorphism) for value in center.ligands
+            )
+            if not _permutation_is_odd(mapped_ligands, target.ligands):
+                continue
+            mapped_other = tuple(
+                label
+                for label in map_labels(automorphism)
+                if label[:2] != ("T", center.atom)
+            )
+            if mapped_other == other_labels and map_ez(automorphism) == raw_ez:
+                has_odd_stabilizer = True
+                break
+        if not has_odd_stabilizer:
+            active.add(("T", center.atom))
+    return frozenset(active)
 
 
-def analyze_chiral(molecule_obj) -> ChiralAnalysis:
-    """Return tetrahedral and allene-like stereogenic elements and assignments."""
-    bonds = molecule_obj.bonds
-    tetrahedral = _find_tetrahedral_centers(bonds)
-    allenes = _find_allene_centers(bonds)
-    return ChiralAnalysis(
-        tetrahedral_centers=tetrahedral,
-        allene_centers=allenes,
-        assignments=_enumerate_chiral_assignments(bonds, tetrahedral, allenes),
+def chiral_assignments_for_ez(
+    bonds: np.ndarray,
+    analysis: ChiralAnalysis,
+    ez_assignment: EzAssignment,
+) -> tuple[ChiralAssignment, ...]:
+    """Enumerate chiral configurations under automorphisms preserving E/Z labels."""
+    if not ez_assignment.labels:
+        return analysis.assignments
+    raw_ez = tuple(sorted(ez_assignment.labels))
+
+    def mapped_ez(automorphism):
+        return tuple(
+            sorted(
+                (
+                    min(automorphism[atom1], automorphism[atom2]),
+                    max(automorphism[atom1], automorphism[atom2]),
+                    label,
+                )
+                for atom1, atom2, label in raw_ez
+            )
+        )
+
+    preserving = tuple(
+        automorphism
+        for automorphism in analysis.automorphisms
+        if mapped_ez(automorphism) == raw_ez
+    )
+    return _enumerate_chiral_assignments(
+        bonds,
+        analysis.tetrahedral_centers,
+        analysis.allene_centers,
+        preserving,
     )

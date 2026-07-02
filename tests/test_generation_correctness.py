@@ -1,4 +1,5 @@
 """ test cases to verify the correctness of the hydrocarbon generation pipeline. """
+import importlib.util
 import unittest
 from unittest import mock
 
@@ -485,6 +486,186 @@ class GenerationCorrectnessTests(unittest.TestCase):
         self.assertEqual(len(default_c4h8), 5)
         self.assertGreater(len(stereo_c4h8), len(default_c4h8))
         self.assertIn("C/C=C/C", stereo_c4h8)
+
+    def test_single_tetrahedral_center_expands_to_two_smiles(self):
+        bonds = np.zeros((7, 7), dtype=int)
+        for atom1, atom2 in ((0, 1), (0, 2), (2, 3), (0, 4), (4, 5), (5, 6)):
+            bonds[atom1][atom2] = bonds[atom2][atom1] = 1
+        molecule_obj = molecule.Molecule(bonds)
+
+        analysis = stereochemistry.analyze_chiral(molecule_obj)
+        smiles = converter.mat2smiles_variants(
+            molecule_obj,
+            include_tetrahedral_stereo=True,
+        )
+
+        self.assertEqual(len(analysis.tetrahedral_centers), 1)
+        self.assertEqual(len(smiles), 2)
+        self.assertTrue(any("[C@H]" in value for value in smiles))
+        self.assertTrue(any("[C@@H]" in value for value in smiles))
+
+    def test_equal_tetrahedral_ligands_are_not_stereogenic(self):
+        bonds = np.zeros((5, 5), dtype=int)
+        for atom1, atom2 in ((0, 1), (0, 2), (0, 3), (3, 4)):
+            bonds[atom1][atom2] = bonds[atom2][atom1] = 1
+        molecule_obj = molecule.Molecule(bonds)
+
+        analysis = stereochemistry.analyze_chiral(molecule_obj)
+
+        self.assertEqual(analysis.tetrahedral_centers, ())
+
+    def test_symmetric_two_center_molecule_has_three_assignments(self):
+        bonds = np.zeros((8, 8), dtype=int)
+        for atom1, atom2 in (
+            (0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (2, 6), (3, 7)
+        ):
+            bonds[atom1][atom2] = bonds[atom2][atom1] = 1
+        molecule_obj = molecule.Molecule(bonds)
+
+        analysis = stereochemistry.analyze_chiral(molecule_obj)
+        smiles = converter.mat2smiles_variants(
+            molecule_obj,
+            include_tetrahedral_stereo=True,
+        )
+
+        self.assertEqual(len(analysis.tetrahedral_centers), 2)
+        self.assertEqual(len(analysis.assignments), 3)
+        self.assertEqual(len(smiles), 3)
+
+    def test_allene_like_center_expands_to_two_smiles(self):
+        bonds = np.zeros((5, 5), dtype=int)
+        for atom1, atom2, order in ((0, 1, 2), (1, 2, 2), (0, 3, 1), (2, 4, 1)):
+            bonds[atom1][atom2] = bonds[atom2][atom1] = order
+        molecule_obj = molecule.Molecule(bonds)
+
+        analysis = stereochemistry.analyze_chiral(molecule_obj)
+        smiles = converter.mat2smiles_variants(
+            molecule_obj,
+            include_tetrahedral_stereo=True,
+        )
+
+        self.assertEqual(len(analysis.allene_centers), 1)
+        self.assertEqual(len(smiles), 2)
+        self.assertTrue(any("@AL1" in value for value in smiles))
+        self.assertTrue(any("@AL2" in value for value in smiles))
+
+    def test_odd_cumulene_is_not_allene_like_stereogenic(self):
+        bonds = np.zeros((6, 6), dtype=int)
+        for atom1, atom2, order in (
+            (0, 1, 2), (1, 2, 2), (2, 3, 2), (0, 4, 1), (3, 5, 1)
+        ):
+            bonds[atom1][atom2] = bonds[atom2][atom1] = order
+        molecule_obj = molecule.Molecule(bonds)
+
+        self.assertEqual(stereochemistry.analyze_chiral(molecule_obj).allene_centers, ())
+
+    def test_extended_even_cumulene_is_allene_like(self):
+        bonds = np.zeros((7, 7), dtype=int)
+        for atom1, atom2, order in (
+            (0, 1, 2), (1, 2, 2), (2, 3, 2), (3, 4, 2), (0, 5, 1), (4, 6, 1)
+        ):
+            bonds[atom1][atom2] = bonds[atom2][atom1] = order
+        molecule_obj = molecule.Molecule(bonds)
+
+        analysis = stereochemistry.analyze_chiral(molecule_obj)
+        smiles = converter.mat2smiles_variants(
+            molecule_obj,
+            include_tetrahedral_stereo=True,
+        )
+
+        self.assertEqual(len(analysis.allene_centers), 1)
+        self.assertEqual(len(smiles), 2)
+
+    def test_ez_and_tetrahedral_configurations_form_product(self):
+        bonds = np.zeros((8, 8), dtype=int)
+        for atom1, atom2, order in (
+            (0, 1, 1), (0, 2, 1), (2, 3, 1), (0, 4, 1),
+            (4, 5, 1), (5, 6, 2), (6, 7, 1),
+        ):
+            bonds[atom1][atom2] = bonds[atom2][atom1] = order
+        molecule_obj = molecule.Molecule(bonds)
+
+        smiles = converter.mat2smiles_variants(
+            molecule_obj,
+            include_stereo=True,
+            include_tetrahedral_stereo=True,
+        )
+
+        self.assertEqual(len(smiles), 4)
+        self.assertTrue(all("@" in value for value in smiles))
+        self.assertTrue(all("/" in value or "\\" in value for value in smiles))
+
+    def test_tetrahedral_outputs_survive_atom_renumbering(self):
+        bonds = np.zeros((7, 7), dtype=int)
+        for atom1, atom2 in ((0, 1), (0, 2), (2, 3), (0, 4), (4, 5), (5, 6)):
+            bonds[atom1][atom2] = bonds[atom2][atom1] = 1
+        permutation = [4, 2, 6, 0, 5, 1, 3]
+        original = molecule.Molecule(bonds)
+        renumbered = molecule.Molecule(bonds[np.ix_(permutation, permutation)])
+
+        original_smiles = converter.mat2smiles_variants(original, False, True)
+        renumbered_smiles = converter.mat2smiles_variants(renumbered, False, True)
+
+        self.assertEqual(len(original_smiles), 2)
+        self.assertEqual(len(renumbered_smiles), 2)
+
+    def test_ring_tetrahedral_centers_render_valid_ring_smiles(self):
+        bonds = np.zeros((8, 8), dtype=int)
+        for atom1, atom2 in (
+            (0, 1), (1, 2), (2, 3), (3, 4),
+            (4, 5), (5, 0), (0, 6), (1, 7),
+        ):
+            bonds[atom1][atom2] = bonds[atom2][atom1] = 1
+        molecule_obj = molecule.Molecule(bonds)
+
+        analysis = stereochemistry.analyze_chiral(molecule_obj)
+        smiles = converter.mat2smiles_variants(molecule_obj, False, True)
+
+        self.assertEqual(len(analysis.tetrahedral_centers), 2)
+        self.assertEqual(len(smiles), 3)
+        self.assertTrue(all("@" in value and "1" in value for value in smiles))
+
+    @unittest.skipUnless(importlib.util.find_spec("rdkit"), "RDKit is not installed")
+    def test_atom_centered_stereo_smiles_parse_with_rdkit(self):
+        from rdkit import Chem
+
+        tetra_bonds = np.zeros((7, 7), dtype=int)
+        for atom1, atom2 in ((0, 1), (0, 2), (2, 3), (0, 4), (4, 5), (5, 6)):
+            tetra_bonds[atom1][atom2] = tetra_bonds[atom2][atom1] = 1
+        allene_bonds = np.zeros((5, 5), dtype=int)
+        for atom1, atom2, order in ((0, 1, 2), (1, 2, 2), (0, 3, 1), (2, 4, 1)):
+            allene_bonds[atom1][atom2] = allene_bonds[atom2][atom1] = order
+
+        tetra_smiles = converter.mat2smiles_variants(
+            molecule.Molecule(tetra_bonds), False, True
+        )
+        allene_smiles = converter.mat2smiles_variants(
+            molecule.Molecule(allene_bonds), False, True
+        )
+
+        tetra_molecules = [Chem.MolFromSmiles(value) for value in tetra_smiles]
+        self.assertTrue(all(item is not None for item in tetra_molecules))
+        self.assertEqual(
+            len({
+                Chem.MolToSmiles(item, isomericSmiles=True)
+                for item in tetra_molecules
+                if item is not None
+            }),
+            2,
+        )
+        self.assertTrue(all(Chem.MolFromSmiles(value) is not None for value in allene_smiles))
+
+    def test_tetrahedral_flag_is_independent_from_ez_flag(self):
+        groups = generation_pipeline.run_generation_smiles_groups(
+            min_carbon=7,
+            max_carbon=7,
+            workers=1,
+            include_methane=False,
+            include_tetrahedral_stereo=True,
+        )
+
+        values = [smiles for group in groups for smiles in group.smiles]
+        self.assertTrue(any("@" in smiles for smiles in values))
 
     def test_pipeline_workers_one_uses_sequential_map(self):
         """Test that the generation pipeline does not use ProcessPoolExecutor 

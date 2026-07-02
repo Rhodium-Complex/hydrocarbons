@@ -233,6 +233,82 @@ C=10 H= 6 dehydro=  88.0655s build=  76.9766s smiles=  78.3139s count=1690324 to
 C=10 H= 4 dehydro= 108.4789s build=  89.9714s smiles=  62.3244s count=1058206 total= 260.7747s
 C=10 H= 2 dehydro=  50.2545s build=  47.8386s smiles=  13.8541s count= 308312 total= 111.9472s
 C=10 H= 0 dehydro=  14.9224s build=   8.3676s smiles=   0.9324s count=  18852 total=  24.2224s
+
+.\.venv\Scripts\python.exe -u main.py --max-carbon 10 --workers 6 --include-stereo --include-tetrahedral-stereo
+C= 2 H= 6 dehydro=   0.0000s build=   0.3237s smiles=   0.0002s count=      1 total=   0.3240s
+C= 2 H= 4 dehydro=   0.3545s build=   0.0053s smiles=   0.0003s count=      1 total=   0.3601s
+C= 2 H= 2 dehydro=   0.0013s build=   0.0010s smiles=   0.0001s count=      1 total=   0.0025s
+C= 2 H= 0 dehydro=   0.0006s build=   0.0006s smiles=   0.0000s count=      0 total=   0.0012s
+C= 3 H= 8 dehydro=   0.0000s build=   0.0016s smiles=   0.0002s count=      1 total=   0.0018s
+C= 3 H= 6 dehydro=   0.0016s build=   0.0053s smiles=   0.0003s count=      2 total=   0.0071s
+C= 3 H= 4 dehydro=   0.0119s build=   0.0044s smiles=   0.0006s count=      4 total=   0.0169s
+C= 3 H= 2 dehydro=   0.0023s build=   0.0014s smiles=   0.0006s count=      3 total=   0.0043s
+C= 3 H= 0 dehydro=   0.0017s build=   0.0008s smiles=   0.0002s count=      1 total=   0.0026s
+C= 4 H=10 dehydro=   0.0000s build=   0.0023s smiles=   0.0003s count=      2 total=   0.0026s
+C= 4 H= 8 dehydro=   0.0024s build=   0.0049s smiles=   0.0007s count=      6 total=   0.0080s
+C= 4 H= 6 dehydro=   0.0060s build=   0.0067s smiles=   0.0018s count=     12 total=   0.0144s
+C= 4 H= 4 dehydro=   0.0070s build=   0.0021s smiles=   0.0028s count=     18 total=   0.0119s
+C= 4 H= 2 dehydro=   0.0056s build=   0.0010s smiles=   0.0029s count=     10 total=   0.0094s
+C= 4 H= 0 dehydro=   0.0026s build=   0.0006s smiles=   0.0005s count=      3 total=   0.0038s
+C= 5 H=12 dehydro=   0.0000s build=   0.0042s smiles=   0.0005s count=      3 total=   0.0047s
+C= 5 H=10 dehydro=   0.0030s build=   0.0046s smiles=   0.0130s count=     13 total=   0.0207s
+C= 5 H= 8 dehydro=   0.0102s build=   0.0077s smiles=   0.0063s count=     40 total=   0.0242s
+C= 5 H= 6 dehydro=   0.0109s build=   0.0066s smiles=   0.0138s count=     79 total=   0.0313s
+C= 5 H= 4 dehydro=   0.0146s build=   0.0051s smiles=   0.0317s count=     84 total=   0.0514s
+C= 5 H= 2 dehydro=   0.0096s build=   0.0018s smiles=   0.0095s count=     47 total=   0.0210s
+C= 5 H= 0 dehydro=   0.0053s build=   0.0014s smiles=   0.0022s count=      9 total=   0.0090s
+C= 6 H=14 dehydro=   0.0000s build=   0.0058s smiles=   0.0011s count=      5 total=   0.0069s
+C= 6 H=12 dehydro=   0.0051s build=   0.0103s smiles=   0.0069s count=     36 total=   0.0222s
+C= 6 H=10 dehydro=   0.0188s build=   0.0368s smiles=   0.0277s count=    147 total=   0.0833s
+C= 6 H= 8 dehydro=   0.0375s build=   0.0188s smiles=   0.1914s count=    423 total=   0.2477s
+C= 6 H= 6 dehydro=   0.0474s build=   0.0157s smiles=   0.1590s count=    726 total=   0.2220s
+C= 6 H= 4 dehydro=   0.0453s build=   0.0181s smiles=   0.1391s count=    709 total=   0.2025s
+C= 6 H= 2 dehydro=   0.0320s build=   0.0162s smiles=   0.0644s count=    321 total=   0.1125s
+C= 6 H= 0 dehydro=   0.0201s build=   0.0020s smiles=   0.0102s count=     37 total=   0.0323s
+C= 7 H=16 dehydro=   0.0000s build=   0.0040s smiles=   0.0025s count=     11 total=   0.0064s
+C= 7 H=14 dehydro=   0.0057s build=   0.0099s smiles=   0.0234s count=     94 total=   0.0390s
+C= 7 H=12 dehydro=   0.0204s build=   0.0185s smiles=   0.1097s count=    526 total=   0.1487s
+C= 7 H=10 dehydro=   0.0602s build=   0.0237s smiles=   0.5690s count=   1968 total=   0.6529s
+C= 7 H= 8 dehydro=   0.1013s build=   0.0273s smiles=   0.1963s count=   4921 total=   0.3248s
+C= 7 H= 6 dehydro=   0.1529s build=   0.0311s smiles=   0.2953s count=   7786 total=   0.4794s
+C= 7 H= 4 dehydro=   0.1585s build=   0.0343s smiles=   0.2457s count=   6931 total=   0.4385s
+C= 7 H= 2 dehydro=   0.1237s build=   0.0249s smiles=   0.1149s count=   2599 total=   0.2636s
+C= 7 H= 0 dehydro=   0.0702s build=   0.0081s smiles=   0.0471s count=    175 total=   0.1254s
+C= 8 H=18 dehydro=   0.0000s build=   0.0068s smiles=   0.0066s count=     24 total=   0.0135s
+C= 8 H=16 dehydro=   0.0120s build=   0.0234s smiles=   0.0736s count=    280 total=   0.1090s
+C= 8 H=14 dehydro=   0.0536s build=   0.0601s smiles=   0.1065s count=   1981 total=   0.2203s
+C= 8 H=12 dehydro=   0.1879s build=   0.0974s smiles=   0.3997s count=   9671 total=   0.6850s
+C= 8 H=10 dehydro=   0.4060s build=   0.2040s smiles=   1.3163s count=  32347 total=   1.9264s
+C= 8 H= 8 dehydro=   0.6839s build=   0.2987s smiles=   2.9034s count=  74133 total=   3.8860s
+C= 8 H= 6 dehydro=   0.9456s build=   0.3807s smiles=   4.2903s count= 108462 total=   5.6166s
+C= 8 H= 4 dehydro=   0.9617s build=   0.4419s smiles=   3.5854s count=  88846 total=   4.9891s
+C= 8 H= 2 dehydro=   0.7011s build=   0.3292s smiles=   1.2317s count=  29219 total=   2.2620s
+C= 8 H= 0 dehydro=   0.3568s build=   0.0664s smiles=   0.4273s count=   1733 total=   0.8505s
+C= 9 H=20 dehydro=   0.0000s build=   0.0179s smiles=   0.0212s count=     55 total=   0.0391s
+C= 9 H=18 dehydro=   0.0240s build=   0.0803s smiles=   0.0781s count=    824 total=   0.1824s
+C= 9 H=16 dehydro=   0.1481s build=   0.2443s smiles=   0.3948s count=   7179 total=   0.7873s
+C= 9 H=14 dehydro=   0.5519s build=   0.6551s smiles=   2.0386s count=  43143 total=   3.2456s
+C= 9 H=12 dehydro=   1.5954s build=   1.2423s smiles=   8.4173s count= 186552 total=  11.2549s
+C= 9 H=10 dehydro=   3.4840s build=   2.5064s smiles=  25.0565s count= 575280 total=  31.0469s
+C= 9 H= 8 dehydro=   5.8339s build=   3.9047s smiles=  52.7161s count=1223636 total=  62.4547s
+C= 9 H= 6 dehydro=   7.2708s build=   4.9163s smiles=  70.9559s count=1654165 total=  83.1431s
+C= 9 H= 4 dehydro=   6.7063s build=   5.2682s smiles=  54.8727s count=1234506 total=  66.8472s
+C= 9 H= 2 dehydro=   6.2384s build=   4.3141s smiles=  16.4256s count= 365469 total=  26.9781s
+C= 9 H= 0 dehydro=   2.4392s build=   0.8713s smiles=   1.0556s count=  17885 total=   4.3661s
+C=10 H=22 dehydro=   0.0000s build=   0.0423s smiles=   0.0652s count=    135 total=   0.1075s
+C=10 H=20 dehydro=   0.0496s build=   0.3223s smiles=   0.2187s count=   2514 total=   0.5906s
+C=10 H=18 dehydro=   0.4324s build=   1.2988s smiles=   1.7102s count=  26370 total=   3.4413s
+C=10 H=16 dehydro=   2.0358s build=   3.4279s smiles=  10.2033s count= 192227 total=  15.6669s
+C=10 H=14 dehydro=   6.9340s build=   7.8464s smiles=  49.2012s count=1022084 total=  63.9816s
+C=10 H=12 dehydro=  18.3346s build=  18.6979s smiles= 189.4710s count=4006623 total= 226.5035s
+C=10 H=10 dehydro=  37.7137s build=  37.8028s smiles= 529.8384s count=11367134 total= 605.3549s
+C=10 H= 8 dehydro=  65.3901s build=  60.9222s smiles=1089.5221s count=22396666 total=1215.8343s
+C=10 H= 6 dehydro=  85.0217s build=  72.4752s smiles=1325.6776s count=28165096 total=1483.1745s
+C=10 H= 4 dehydro=  80.1979s build=  69.3743s smiles= 916.8823s count=19459218 total=1066.4544s
+C=10 H= 2 dehydro=  48.2640s build=  44.9499s smiles= 254.9621s count=5348602 total= 348.1761s
+C=10 H= 0 dehydro=  23.2201s build=   9.4320s smiles=  13.6310s count= 239498 total=  46.2831s
+
+
 # 8/28 21:50-9/1 22:33
 ```
  2 :...1 ...1 ...1 ...

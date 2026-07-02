@@ -24,12 +24,25 @@ Useful options:
 - `--workers`: number of worker processes for generation.
 - `--no-smiles`: skip SMILES conversion and report structure counts only.
 - `--include-stereo`: expand formal E/Z stereoisomers during final SMILES output.
+- `--include-tetrahedral-stereo`: expand tetrahedral-carbon and allene-like
+  configurations using `@`/`@@` and `@AL1`/`@AL2` SMILES notation.
 
 For E/Z-aware SMILES output, enable stereo expansion:
 
 ```powershell
 .\.venv\Scripts\python.exe -u main.py --max-carbon 8 --workers 4 --include-stereo
 ```
+
+Atom-centered stereochemistry can be enabled independently or together with E/Z:
+
+```powershell
+.\.venv\Scripts\python.exe -u main.py --max-carbon 8 --workers 4 --include-tetrahedral-stereo
+.\.venv\Scripts\python.exe -u main.py --max-carbon 8 --workers 4 --include-stereo --include-tetrahedral-stereo
+```
+
+The binary configurations are enumeration labels, not guaranteed CIP R/S or
+Ra/Sa names. Tetrahedral carbon and even cumulene (allene-like) stereochemistry
+are supported; helicity and conformational stereochemistry are not.
 
 Export generated structures to a B5 PDF grid:
 

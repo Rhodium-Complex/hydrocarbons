@@ -12,6 +12,7 @@ import molecule
 
 HYDROGEN_LIGAND = -1
 EzLabel = tuple[int, int, str]
+ChiralLabel = tuple[str, int, int]
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,41 @@ class EzAnalysis:
             if edge == (double_bond.atom1, double_bond.atom2):
                 return double_bond
         return None
+
+
+@dataclass(frozen=True)
+class TetrahedralCenter:
+    """A tetrahedral carbon and its deterministic four-ligand reference order."""
+
+    atom: int
+    ligands: tuple[int, int, int, int]
+    hydrogen_count: int
+
+
+@dataclass(frozen=True)
+class AlleneCenter:
+    """An even cumulene chain with distinguishable ligand pairs at both ends."""
+
+    center_atom: int
+    path: tuple[int, ...]
+    ligands1: tuple[int, int]
+    ligands2: tuple[int, int]
+
+
+@dataclass(frozen=True)
+class ChiralAssignment:
+    """Binary configurations for tetrahedral and allene-like centers."""
+
+    labels: tuple[ChiralLabel, ...]
+
+
+@dataclass(frozen=True)
+class ChiralAnalysis:
+    """Atom-centered stereogenic elements and symmetry-unique assignments."""
+
+    tetrahedral_centers: tuple[TetrahedralCenter, ...]
+    allene_centers: tuple[AlleneCenter, ...]
+    assignments: tuple[ChiralAssignment, ...]
 
 
 def _compressed_color_ids(signatures: list[tuple]) -> list[int]:
@@ -298,4 +334,210 @@ def analyze_ez(molecule_obj) -> EzAnalysis:
     return EzAnalysis(
         double_bonds=double_bonds,
         assignments=_enumerate_assignments(molecule_obj.bonds, double_bonds),
+    )
+
+
+def _ligand_order(colors: list[int], ligands: list[int]) -> tuple[int, ...] | None:
+    signatures = [
+        (0, ligand) if ligand == HYDROGEN_LIGAND else (colors[ligand] + 1, ligand)
+        for ligand in ligands
+    ]
+    if len({signature[0] for signature in signatures}) != len(signatures):
+        return None
+    return tuple(ligand for _color, ligand in sorted(signatures))
+
+
+def _find_tetrahedral_centers(bonds: np.ndarray) -> tuple[TetrahedralCenter, ...]:
+    hydrogens = molecule.implicit_hydrogens(bonds)
+    centers = []
+    for atom in range(len(bonds)):
+        neighbors = [int(value) for value in np.where(bonds[atom] > 0)[0]]
+        hydrogen_count = int(hydrogens[atom])
+        if hydrogen_count > 1 or len(neighbors) + hydrogen_count != 4:
+            continue
+        if any(bonds[atom][neighbor] != 1 for neighbor in neighbors):
+            continue
+        blocked = bonds.copy()
+        blocked[atom, :] = 0
+        blocked[:, atom] = 0
+        colors = _refined_atom_colors(blocked)
+        ligands = neighbors + [HYDROGEN_LIGAND] * hydrogen_count
+        ordered = _ligand_order(colors, ligands)
+        if ordered is None:
+            continue
+        centers.append(
+            TetrahedralCenter(atom, ordered, hydrogen_count)  # type: ignore[arg-type]
+        )
+    return tuple(centers)
+
+
+def _double_bond_paths(bonds: np.ndarray) -> list[tuple[int, ...]]:
+    adjacency = {
+        atom: [int(n) for n in np.where(bonds[atom] == 2)[0]]
+        for atom in range(len(bonds))
+    }
+    endpoints = sorted(atom for atom, values in adjacency.items() if len(values) == 1)
+    visited_edges = set()
+    paths = []
+    for start in endpoints:
+        first_edge = frozenset((start, adjacency[start][0]))
+        if first_edge in visited_edges:
+            continue
+        path = [start]
+        previous = None
+        current = start
+        while True:
+            candidates = [n for n in adjacency[current] if n != previous]
+            if not candidates:
+                break
+            next_atom = candidates[0]
+            edge = frozenset((current, next_atom))
+            if edge in visited_edges:
+                break
+            visited_edges.add(edge)
+            path.append(next_atom)
+            previous, current = current, next_atom
+            if len(adjacency[current]) != 2:
+                break
+        if len(path) > 2:
+            paths.append(tuple(path))
+    return paths
+
+
+def _terminal_ligands(
+    bonds: np.ndarray,
+    terminal: int,
+    chain_neighbor: int,
+    hydrogens: np.ndarray,
+) -> list[int]:
+    ligands = [
+        int(value)
+        for value in np.where(bonds[terminal] > 0)[0]
+        if int(value) != chain_neighbor
+    ]
+    ligands.extend([HYDROGEN_LIGAND] * int(hydrogens[terminal]))
+    return ligands
+
+
+def _find_allene_centers(bonds: np.ndarray) -> tuple[AlleneCenter, ...]:
+    hydrogens = molecule.implicit_hydrogens(bonds)
+    centers = []
+    for raw_path in _double_bond_paths(bonds):
+        if (len(raw_path) - 1) % 2 or len(raw_path) < 3:
+            continue
+        path = raw_path if raw_path[0] < raw_path[-1] else tuple(reversed(raw_path))
+        ligands1 = _terminal_ligands(bonds, path[0], path[1], hydrogens)
+        ligands2 = _terminal_ligands(bonds, path[-1], path[-2], hydrogens)
+        if len(ligands1) != 2 or len(ligands2) != 2:
+            continue
+        blocked = bonds.copy()
+        for left, right in zip(path, path[1:]):
+            blocked[left][right] = blocked[right][left] = 0
+        colors = _refined_atom_colors(blocked)
+        ordered1 = _ligand_order(colors, ligands1)
+        ordered2 = _ligand_order(colors, ligands2)
+        if ordered1 is None or ordered2 is None:
+            continue
+        centers.append(
+            AlleneCenter(
+                center_atom=path[len(path) // 2],
+                path=path,
+                ligands1=ordered1,  # type: ignore[arg-type]
+                ligands2=ordered2,  # type: ignore[arg-type]
+            )
+        )
+    return tuple(centers)
+
+
+def _permutation_is_odd(source: tuple[int, ...], target: tuple[int, ...]) -> bool:
+    positions = {value: index for index, value in enumerate(target)}
+    permutation = [positions[value] for value in source]
+    inversions = sum(
+        permutation[left] > permutation[right]
+        for left in range(len(permutation))
+        for right in range(left + 1, len(permutation))
+    )
+    return bool(inversions % 2)
+
+
+def _map_ligand(ligand: int, automorphism: tuple[int, ...]) -> int:
+    return ligand if ligand == HYDROGEN_LIGAND else automorphism[ligand]
+
+
+def _enumerate_chiral_assignments(
+    bonds: np.ndarray,
+    tetrahedral_centers: tuple[TetrahedralCenter, ...],
+    allene_centers: tuple[AlleneCenter, ...],
+) -> tuple[ChiralAssignment, ...]:
+    elements = [*(('T', center.atom) for center in tetrahedral_centers), *(
+        ('A', center.center_atom) for center in allene_centers
+    )]
+    if not elements:
+        return (ChiralAssignment(labels=()),)
+    tetra_by_atom = {center.atom: center for center in tetrahedral_centers}
+    allene_by_center = {center.center_atom: center for center in allene_centers}
+    automorphisms = isomorphism.automorphisms(bonds)
+
+    def mapped_key(bits, automorphism):
+        mapped = []
+        for (kind, atom), bit in zip(elements, bits):
+            mapped_atom = automorphism[atom]
+            parity = False
+            if kind == 'T':
+                source = tetra_by_atom[atom]
+                target = tetra_by_atom.get(mapped_atom)
+                if target is None:
+                    return None
+                mapped_ligands = tuple(
+                    _map_ligand(value, automorphism) for value in source.ligands
+                )
+                parity = _permutation_is_odd(mapped_ligands, target.ligands)
+            else:
+                source = allene_by_center[atom]
+                target = allene_by_center.get(mapped_atom)
+                if target is None:
+                    return None
+                mapped_end = automorphism[source.path[0]]
+                target_pairs = (
+                    (target.ligands1, target.ligands2)
+                    if mapped_end == target.path[0]
+                    else (target.ligands2, target.ligands1)
+                )
+                mapped_pairs = (
+                    tuple(_map_ligand(v, automorphism) for v in source.ligands1),
+                    tuple(_map_ligand(v, automorphism) for v in source.ligands2),
+                )
+                parity = _permutation_is_odd(mapped_pairs[0], target_pairs[0]) ^ (
+                    _permutation_is_odd(mapped_pairs[1], target_pairs[1])
+                )
+            mapped.append((kind, mapped_atom, bit ^ int(parity)))
+        return tuple(sorted(mapped))
+
+    assignments = []
+    seen = set()
+    for bits in itertools.product((0, 1), repeat=len(elements)):
+        keys = [mapped_key(bits, auto) for auto in automorphisms]
+        canonical = min(key for key in keys if key is not None)
+        if canonical in seen:
+            continue
+        seen.add(canonical)
+        assignments.append(
+            ChiralAssignment(
+                labels=tuple(
+                    (kind, atom, bit) for (kind, atom), bit in zip(elements, bits)
+                )
+            )
+        )
+    return tuple(assignments)
+
+
+def analyze_chiral(molecule_obj) -> ChiralAnalysis:
+    """Return tetrahedral and allene-like stereogenic elements and assignments."""
+    bonds = molecule_obj.bonds
+    tetrahedral = _find_tetrahedral_centers(bonds)
+    allenes = _find_allene_centers(bonds)
+    return ChiralAnalysis(
+        tetrahedral_centers=tetrahedral,
+        allene_centers=allenes,
+        assignments=_enumerate_chiral_assignments(bonds, tetrahedral, allenes),
     )

@@ -140,6 +140,12 @@ converter.mat2smiles_variants(..., include_stereo=True)
   -> converter.mat2stereo_smiles(...)
 ```
 
+`include_tetrahedral_stereo=True` additionally calls
+`stereochemistry.analyze_chiral(...)` and renders tetrahedral carbon as
+`[C@H]`/`[C@@H]` or `[C@]`/`[C@@]`. Even cumulene chains are rendered with
+`[C@AL1]`/`[C@AL2]` on their central atom. This is configuration enumeration,
+not CIP R/S or Ra/Sa naming; helicity is outside the supported scope.
+
 ここでの E/Z は正式な CIP 命名ではなく、二重結合の二つの相対配置を
 列挙するための内部ラベルです。環状構造では、立体制約を先に解いてから
 全域木と環閉鎖辺の両方へ `/`・`\\` を付与します。制約が矛盾する、標準

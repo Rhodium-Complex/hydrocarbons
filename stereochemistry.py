@@ -468,6 +468,60 @@ def _map_ligand(ligand: int, automorphism: tuple[int, ...]) -> int:
     return ligand if ligand == HYDROGEN_LIGAND else automorphism[ligand]
 
 
+def _compile_chiral_action(elements, tetra_by_atom, allene_by_center, automorphism):
+    """Compile one automorphism into mapped centers and configuration parity."""
+    action = []
+    for kind, atom in elements:
+        mapped_atom = automorphism[atom]
+        if kind == "T":
+            source = tetra_by_atom[atom]
+            target = tetra_by_atom[mapped_atom]
+            mapped_ligands = tuple(
+                _map_ligand(value, automorphism) for value in source.ligands
+            )
+            parity = _permutation_is_odd(mapped_ligands, target.ligands)
+        else:
+            source = allene_by_center[atom]
+            target = allene_by_center[mapped_atom]
+            mapped_end = automorphism[source.path[0]]
+            target_pairs = (
+                (target.ligands1, target.ligands2)
+                if mapped_end == target.path[0]
+                else (target.ligands2, target.ligands1)
+            )
+            mapped_pairs = (
+                tuple(_map_ligand(value, automorphism) for value in source.ligands1),
+                tuple(_map_ligand(value, automorphism) for value in source.ligands2),
+            )
+            parity = _permutation_is_odd(mapped_pairs[0], target_pairs[0]) ^ (
+                _permutation_is_odd(mapped_pairs[1], target_pairs[1])
+            )
+        action.append((kind, mapped_atom, int(parity)))
+    return tuple(action)
+
+
+def _map_chiral_labels(labels, action):
+    return tuple(
+        sorted(
+            (kind, mapped_atom, bit ^ parity)
+            for (_kind, _atom, bit), (kind, mapped_atom, parity) in zip(labels, action)
+        )
+    )
+
+
+def _map_ez_labels(labels, automorphism):
+    return tuple(
+        sorted(
+            (
+                min(automorphism[atom1], automorphism[atom2]),
+                max(automorphism[atom1], automorphism[atom2]),
+                label,
+            )
+            for atom1, atom2, label in labels
+        )
+    )
+
+
 def _enumerate_chiral_assignments(
     bonds: np.ndarray,
     tetrahedral_centers: tuple[TetrahedralCenter, ...],
@@ -483,38 +537,12 @@ def _enumerate_chiral_assignments(
     allene_by_center = {center.center_atom: center for center in allene_centers}
     automorphisms = automorphisms or tuple(isomorphism.automorphisms(bonds))
 
-    def compile_action(automorphism):
-        action = []
-        for kind, atom in elements:
-            mapped_atom = automorphism[atom]
-            parity = False
-            if kind == "T":
-                source = tetra_by_atom[atom]
-                target = tetra_by_atom[mapped_atom]
-                mapped_ligands = tuple(
-                    _map_ligand(value, automorphism) for value in source.ligands
-                )
-                parity = _permutation_is_odd(mapped_ligands, target.ligands)
-            else:
-                source = allene_by_center[atom]
-                target = allene_by_center[mapped_atom]
-                mapped_end = automorphism[source.path[0]]
-                target_pairs = (
-                    (target.ligands1, target.ligands2)
-                    if mapped_end == target.path[0]
-                    else (target.ligands2, target.ligands1)
-                )
-                mapped_pairs = (
-                    tuple(_map_ligand(v, automorphism) for v in source.ligands1),
-                    tuple(_map_ligand(v, automorphism) for v in source.ligands2),
-                )
-                parity = _permutation_is_odd(mapped_pairs[0], target_pairs[0]) ^ (
-                    _permutation_is_odd(mapped_pairs[1], target_pairs[1])
-                )
-            action.append((kind, mapped_atom, int(parity)))
-        return tuple(action)
-
-    actions = tuple(compile_action(automorphism) for automorphism in automorphisms)
+    actions = tuple(
+        _compile_chiral_action(
+            elements, tetra_by_atom, allene_by_center, automorphism
+        )
+        for automorphism in automorphisms
+    )
 
     def mapped_key(bits, action):
         return tuple(
@@ -630,50 +658,8 @@ def active_chiral_centers(
     raw_labels = tuple(sorted(assignment.labels))
     raw_ez = tuple(sorted(ez_assignment.labels)) if ez_assignment is not None else ()
 
-    def map_labels(automorphism):
-        mapped = []
-        for kind, atom, bit in assignment.labels:
-            mapped_atom = automorphism[atom]
-            parity = False
-            if kind == "T":
-                source = tetra_by_atom[atom]
-                target = tetra_by_atom[mapped_atom]
-                mapped_ligands = tuple(
-                    _map_ligand(value, automorphism) for value in source.ligands
-                )
-                parity = _permutation_is_odd(mapped_ligands, target.ligands)
-            else:
-                source = allene_by_center[atom]
-                target = allene_by_center[mapped_atom]
-                mapped_end = automorphism[source.path[0]]
-                target_pairs = (
-                    (target.ligands1, target.ligands2)
-                    if mapped_end == target.path[0]
-                    else (target.ligands2, target.ligands1)
-                )
-                mapped_pairs = (
-                    tuple(_map_ligand(v, automorphism) for v in source.ligands1),
-                    tuple(_map_ligand(v, automorphism) for v in source.ligands2),
-                )
-                parity = _permutation_is_odd(mapped_pairs[0], target_pairs[0]) ^ (
-                    _permutation_is_odd(mapped_pairs[1], target_pairs[1])
-                )
-            mapped.append((kind, mapped_atom, bit ^ int(parity)))
-        return tuple(sorted(mapped))
-
-    def map_ez(automorphism):
-        return tuple(
-            sorted(
-                (
-                    min(automorphism[atom1], automorphism[atom2]),
-                    max(automorphism[atom1], automorphism[atom2]),
-                    label,
-                )
-                for atom1, atom2, label in raw_ez
-            )
-        )
-
     automorphisms = analysis.automorphisms or tuple(isomorphism.automorphisms(bonds))
+    elements = tuple(label[:2] for label in assignment.labels)
     active = {("A", center.center_atom) for center in analysis.allene_centers}
     for center in analysis.tetrahedral_centers:
         other_labels = tuple(
@@ -683,18 +669,21 @@ def active_chiral_centers(
         for automorphism in automorphisms:
             if automorphism[center.atom] != center.atom:
                 continue
-            target = tetra_by_atom[center.atom]
-            mapped_ligands = tuple(
-                _map_ligand(value, automorphism) for value in center.ligands
+            action = _compile_chiral_action(
+                elements, tetra_by_atom, allene_by_center, automorphism
             )
-            if not _permutation_is_odd(mapped_ligands, target.ligands):
+            center_action = action[elements.index(("T", center.atom))]
+            if not center_action[2]:
                 continue
             mapped_other = tuple(
                 label
-                for label in map_labels(automorphism)
+                for label in _map_chiral_labels(assignment.labels, action)
                 if label[:2] != ("T", center.atom)
             )
-            if mapped_other == other_labels and map_ez(automorphism) == raw_ez:
+            if (
+                mapped_other == other_labels
+                and _map_ez_labels(raw_ez, automorphism) == raw_ez
+            ):
                 has_odd_stabilizer = True
                 break
         if not has_odd_stabilizer:
@@ -712,22 +701,10 @@ def chiral_assignments_for_ez(
         return analysis.assignments
     raw_ez = tuple(sorted(ez_assignment.labels))
 
-    def mapped_ez(automorphism):
-        return tuple(
-            sorted(
-                (
-                    min(automorphism[atom1], automorphism[atom2]),
-                    max(automorphism[atom1], automorphism[atom2]),
-                    label,
-                )
-                for atom1, atom2, label in raw_ez
-            )
-        )
-
     preserving = tuple(
         automorphism
         for automorphism in analysis.automorphisms
-        if mapped_ez(automorphism) == raw_ez
+        if _map_ez_labels(raw_ez, automorphism) == raw_ez
     )
     return _enumerate_chiral_assignments(
         bonds,

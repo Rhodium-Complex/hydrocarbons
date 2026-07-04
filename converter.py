@@ -245,6 +245,17 @@ def _render_cyclic_stereo(mat, traversal, directional_bonds, atom_tokens=None):
     return emit(root)
 
 
+def _edge_reversed(traversal, left, right, bonds=None):
+    """Return whether traversal emits an edge opposite to left-to-right."""
+    parent, _children, rank, tree_edges, _closure_edges = traversal
+    if bonds is not None and bonds[left][right] == 0:
+        return None
+    edge = frozenset((left, right))
+    if edge in tree_edges:
+        return parent.get(right) != left
+    return not (rank[left] < rank[right])
+
+
 def _lexical_neighbors(atom, traversal, hydrogen_count=0):
     """Return neighbors in the order used for atom-centered SMILES chirality."""
     parent, children, _, _tree_edges, closure_edges = traversal
@@ -334,18 +345,14 @@ def _combined_stereo_smiles(
     traversal = traversal or _stereo_traversal(mat.bonds, 0)
     if traversal is None:
         return _render_smiles(mat)
-    parent, _children, rank, tree_edges, _closure_edges = traversal
     directional_bonds = {}
     if ez_assignment is not None and ez_assignment.labels:
         stereo_data = _stereo_data(mat, ez_assignment.labels, ez_analysis)
         if stereo_data:
-            def edge_reversed(left, right):
-                edge = frozenset((left, right))
-                if edge in tree_edges:
-                    return parent[right] != left
-                return not (rank[left] < rank[right])
-
-            solved = _solve_directional_bonds(stereo_data, edge_reversed)
+            solved = _solve_directional_bonds(
+                stereo_data,
+                lambda left, right: _edge_reversed(traversal, left, right),
+            )
             if solved is not None:
                 directional_bonds = solved
     active_centers = (
@@ -382,21 +389,11 @@ def _cyclic_stereo_smiles(mat, assignment, analysis, traversal=None):
     traversal = traversal or _stereo_traversal(mat.bonds, root)
     if traversal is None:
         return None
-    parent, _children, rank, tree_edges, _closure_edges = traversal
-
-    def edge_reversed(left, right):
-        edge = frozenset((left, right))
-        if mat.bonds[left][right] == 0:
-            return None
-        if edge in tree_edges:
-            emitted = (parent[right] == left)
-        else:
-            emitted = rank[left] < rank[right]
-        return not emitted
-
     directional_bonds = _solve_directional_bonds(
         stereo_data,
-        edge_reversed=edge_reversed,
+        edge_reversed=lambda left, right: _edge_reversed(
+            traversal, left, right, mat.bonds
+        ),
     )
     if directional_bonds is None:
         return None

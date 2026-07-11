@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Iterator
 from functools import lru_cache
 import itertools
 
@@ -15,6 +16,8 @@ HYDROGEN_LIGAND = -1
 EzLabel = tuple[int, int, str]
 ChiralLabel = tuple[str, int, int]
 EzAction = dict[tuple[int, int], tuple[tuple[int, int], bool]]
+Automorphism = tuple[int, ...]
+ChiralAction = tuple[tuple[str, int, int], ...]
 
 
 @dataclass(frozen=True)
@@ -73,10 +76,7 @@ class EzAnalysis:
         """Return static and configuration-dependent E/Z candidates."""
         return self.double_bonds + self.conditional_double_bonds
 
-    def double_bond_for_assignment(
-        self,
-        assignment: EzAssignment,
-    ) -> EzDoubleBond | None:
+    def double_bond_for_assignment(self, assignment: EzAssignment) -> EzDoubleBond | None:
         """単一のE/Z割当てが指す二重結合を返す。"""
         edge = assignment.single_edge
         if edge is None:
@@ -140,7 +140,7 @@ class ChiralAnalysis:
 
 
 # 原子・配位子の同一性判定
-def _compressed_color_ids(signatures: list[tuple]) -> list[int]:
+def _compressed_color_ids(signatures: list[tuple[object, ...]]) -> list[int]:
     """シグネチャへ決定的で連続した整数の色番号を割り当てる。"""
     color_by_signature = {
         signature: index + 1
@@ -192,10 +192,7 @@ def _refined_atom_colors(blocked: np.ndarray) -> list[int]:
 
 
 def _ligands_for_atom(
-    bonds: np.ndarray,
-    atom: int,
-    double_bond_partner: int,
-    hydrogens: np.ndarray,
+    bonds: np.ndarray, atom: int, double_bond_partner: int, hydrogens: np.ndarray
 ) -> list[int]:
     ligands = [
         int(neighbor)
@@ -263,8 +260,8 @@ def _find_ez_double_bonds_for_bonds(
         if len(path) > 2
         for left, right in zip(path, path[1:])
     }
-    double_bonds = []
-    conditional_double_bonds = []
+    double_bonds: list[EzDoubleBond] = []
+    conditional_double_bonds: list[EzDoubleBond] = []
     for atom1, bond_row in enumerate(bonds):
         for atom2, bond_order in enumerate(bond_row[atom1 + 1 :], start=atom1 + 1):
             if bond_order != 2:
@@ -339,7 +336,7 @@ def _find_ez_double_bonds_for_bonds(
 def _enumerate_assignments(
     bonds: np.ndarray,
     double_bonds: tuple[EzDoubleBond, ...],
-    automorphisms: tuple[tuple[int, ...], ...] | None = None,
+    automorphisms: tuple[Automorphism, ...] | None = None,
 ) -> tuple[EzAssignment, ...]:
     if not double_bonds:
         return (EzAssignment(labels=()),)
@@ -365,8 +362,8 @@ def _enumerate_assignments(
         for automorphism in automorphisms
     )
 
-    assignments = []
-    seen_keys = set()
+    assignments: list[EzAssignment] = []
+    seen_keys: set[tuple[EzLabel, ...]] = set()
     for labels in itertools.product(("E", "Z"), repeat=len(double_bonds)):
         assignment = EzAssignment(
             labels=tuple(
@@ -400,10 +397,10 @@ def _ez_bonds_by_edge(
 
 def _compile_ez_action(
     by_edge: dict[tuple[int, int], EzDoubleBond],
-    automorphism: tuple[int, ...],
+    automorphism: Automorphism,
 ) -> EzAction:
     """Compile one automorphism into E/Z edge moves and bit reversals."""
-    action = {}
+    action: EzAction = {}
     for edge, source in by_edge.items():
         mapped_atom1 = automorphism[source.atom1]
         mapped_atom2 = automorphism[source.atom2]
@@ -421,7 +418,7 @@ def _compile_ez_action(
 
 def _map_ez_labels(labels: tuple[EzLabel, ...], action: EzAction) -> tuple[EzLabel, ...]:
     """Map relative E/Z labels with a precompiled automorphism action."""
-    mapped_labels = []
+    mapped_labels: list[EzLabel] = []
     for atom1, atom2, label in labels:
         mapped_edge, flipped = action[(min(atom1, atom2), max(atom1, atom2))]
         mapped_label = "Z" if flipped and label == "E" else "E" if flipped else label
@@ -433,7 +430,7 @@ def _map_ez_labels(labels: tuple[EzLabel, ...], action: EzAction) -> tuple[EzLab
 
 def _ez_action_for_labels(
     labels: tuple[EzLabel, ...],
-    automorphism: tuple[int, ...],
+    automorphism: Automorphism,
     by_edge: dict[tuple[int, int], EzDoubleBond] | None,
 ) -> EzAction:
     if by_edge is not None:
@@ -450,7 +447,7 @@ def _ez_action_for_labels(
 def _conditional_ez_is_active(
     double_bond: EzDoubleBond,
     labels: tuple[EzLabel, ...],
-    automorphisms: tuple[tuple[int, ...], ...],
+    automorphisms: tuple[Automorphism, ...],
     actions: tuple[EzAction, ...],
 ) -> bool:
     """Return whether existing stereo labels distinguish both alkene ends."""
@@ -476,7 +473,7 @@ def _conditional_ez_is_active(
 def _expand_conditional_ez_assignments(
     static_assignments: tuple[EzAssignment, ...],
     conditional_double_bonds: tuple[EzDoubleBond, ...],
-    automorphisms: tuple[tuple[int, ...], ...],
+    automorphisms: tuple[Automorphism, ...],
     all_double_bonds: tuple[EzDoubleBond, ...],
 ) -> tuple[EzAssignment, ...]:
     by_edge = _ez_bonds_by_edge(all_double_bonds)
@@ -484,8 +481,8 @@ def _expand_conditional_ez_assignments(
         _compile_ez_action(by_edge, automorphism)
         for automorphism in automorphisms
     )
-    completed = []
-    seen_states = set()
+    completed: list[EzAssignment] = []
+    seen_states: set[tuple[EzLabel, ...]] = set()
 
     def canonical(labels: tuple[EzLabel, ...]) -> tuple[EzLabel, ...]:
         return min(_map_ez_labels(labels, action) for action in actions)
@@ -515,8 +512,8 @@ def _expand_conditional_ez_assignments(
 
 
 def analyze_ez(
-    molecule_obj,
-    automorphisms: tuple[tuple[int, ...], ...] | None = None,
+    molecule_obj: molecule.Molecule,
+    automorphisms: tuple[Automorphism, ...] | None = None,
 ) -> EzAnalysis:
     """1分子についてE/Z候補と配置割当てを解析する。"""
     double_bonds, conditional_double_bonds = _find_ez_double_bonds_for_bonds(
@@ -542,11 +539,11 @@ def analyze_ez(
     )
 
 
-def analyze_cumulene_ez(molecule_obj) -> CumuleneEzAnalysis:
+def analyze_cumulene_ez(molecule_obj: molecule.Molecule) -> CumuleneEzAnalysis:
     """Return symmetry-unique E/Z assignments for odd cumulene chains."""
     bonds = molecule_obj.bonds
     hydrogens = molecule.implicit_hydrogens(bonds)
-    centers = []
+    centers: list[CumuleneEzCenter] = []
     for raw_path in _double_bond_paths(bonds):
         double_bond_count = len(raw_path) - 1
         if double_bond_count < 3 or double_bond_count % 2 == 0:
@@ -589,7 +586,7 @@ def _ligand_order(colors: list[int], ligands: list[int]) -> tuple[int, ...] | No
 
 def _find_tetrahedral_centers(bonds: np.ndarray) -> tuple[TetrahedralCenter, ...]:
     hydrogens = molecule.implicit_hydrogens(bonds)
-    centers = []
+    centers: list[TetrahedralCenter] = []
     for atom in range(len(bonds)):
         neighbors = [int(value) for value in np.where(bonds[atom] > 0)[0]]
         hydrogen_count = int(hydrogens[atom])
@@ -614,22 +611,22 @@ def _find_tetrahedral_centers(bonds: np.ndarray) -> tuple[TetrahedralCenter, ...
 
 
 def _double_bond_paths(bonds: np.ndarray) -> list[tuple[int, ...]]:
-    adjacency = {
+    adjacency: dict[int, list[int]] = {
         atom: [int(n) for n in np.where(bonds[atom] == 2)[0]]
         for atom in range(len(bonds))
     }
     endpoints = sorted(atom for atom, values in adjacency.items() if len(values) == 1)
-    visited_edges = set()
-    paths = []
+    visited_edges: set[frozenset[int]] = set()
+    paths: list[tuple[int, ...]] = []
     for start in endpoints:
         first_edge = frozenset((start, adjacency[start][0]))
         if first_edge in visited_edges:
             continue
-        path = [start]
-        previous = None
+        path: list[int] = [start]
+        previous: int | None = None
         current = start
         while True:
-            candidates = [n for n in adjacency[current] if n != previous]
+            candidates: list[int] = [n for n in adjacency[current] if n != previous]
             if not candidates:
                 break
             next_atom = candidates[0]
@@ -663,7 +660,7 @@ def _terminal_ligands(
 
 def _find_allene_centers(bonds: np.ndarray) -> tuple[AlleneCenter, ...]:
     hydrogens = molecule.implicit_hydrogens(bonds)
-    centers = []
+    centers: list[AlleneCenter] = []
     for raw_path in _double_bond_paths(bonds):
         if (len(raw_path) - 1) % 2 or len(raw_path) < 3:
             continue
@@ -692,7 +689,7 @@ def _find_allene_centers(bonds: np.ndarray) -> tuple[AlleneCenter, ...]:
 
 
 @lru_cache(maxsize=65536)
-def _permutation_is_odd(source: tuple[int, ...], target: tuple[int, ...]) -> bool:
+def permutation_is_odd(source: tuple[int, ...], target: tuple[int, ...]) -> bool:
     permutation = [target.index(value) for value in source]
     inversions = 0
     for left, left_value in enumerate(permutation):
@@ -701,14 +698,23 @@ def _permutation_is_odd(source: tuple[int, ...], target: tuple[int, ...]) -> boo
     return bool(inversions % 2)
 
 
+# Backward-compatible internal spelling for this module's own call sites.
+_permutation_is_odd = permutation_is_odd
+
+
 def _map_ligand(ligand: int, automorphism: tuple[int, ...]) -> int:
     return ligand if ligand == HYDROGEN_LIGAND else automorphism[ligand]
 
 
 # 自己同型写像による原子中心配置の変換と列挙
-def _compile_chiral_action(elements, tetra_by_atom, allene_by_center, automorphism):
+def _compile_chiral_action(
+    elements: tuple[tuple[str, int], ...],
+    tetra_by_atom: dict[int, TetrahedralCenter],
+    allene_by_center: dict[int, AlleneCenter],
+    automorphism: Automorphism,
+) -> ChiralAction:
     """1つの自己同型写像を移動先中心と配置反転の有無へ変換する。"""
-    action = []
+    action: list[tuple[str, int, int]] = []
     for kind, atom in elements:
         mapped_atom = automorphism[atom]
         if kind == "T":
@@ -738,7 +744,9 @@ def _compile_chiral_action(elements, tetra_by_atom, allene_by_center, automorphi
     return tuple(action)
 
 
-def _map_chiral_labels(labels, action):
+def _map_chiral_labels(
+    labels: tuple[ChiralLabel, ...], action: ChiralAction
+) -> tuple[ChiralLabel, ...]:
     return tuple(
         sorted(
             (kind, mapped_atom, bit ^ parity)
@@ -751,11 +759,13 @@ def _enumerate_chiral_assignments(
     bonds: np.ndarray,
     tetrahedral_centers: tuple[TetrahedralCenter, ...],
     allene_centers: tuple[AlleneCenter, ...],
-    automorphisms: tuple[tuple[int, ...], ...] | None = None,
+    automorphisms: tuple[Automorphism, ...] | None = None,
 ) -> tuple[ChiralAssignment, ...]:
-    elements = [*(('T', center.atom) for center in tetrahedral_centers), *(
-        ('A', center.center_atom) for center in allene_centers
-    )]
+    elements = tuple(
+        [*(('T', center.atom) for center in tetrahedral_centers), *(
+            ('A', center.center_atom) for center in allene_centers
+        )]
+    )
     if not elements:
         return (ChiralAssignment(labels=()),)
     tetra_by_atom = {center.atom: center for center in tetrahedral_centers}
@@ -769,7 +779,7 @@ def _enumerate_chiral_assignments(
         for automorphism in automorphisms
     )
 
-    def mapped_key(bits, action):
+    def mapped_key(bits: tuple[int, ...], action: ChiralAction) -> tuple[ChiralLabel, ...]:
         return tuple(
             sorted(
                 (kind, mapped_atom, bit ^ parity)
@@ -777,10 +787,12 @@ def _enumerate_chiral_assignments(
             )
         )
 
-    def unique_bit_patterns():
-        seen_by_depth = [set() for _ in range(len(elements) + 1)]
+    def unique_bit_patterns() -> Iterator[tuple[int, ...]]:
+        seen_by_depth: list[set[tuple[ChiralLabel, ...]]] = [
+            set() for _ in range(len(elements) + 1)
+        ]
 
-        def visit(bits):
+        def visit(bits: tuple[int, ...]) -> Iterator[tuple[int, ...]]:
             depth = len(bits)
             if depth == len(elements):
                 yield bits
@@ -788,7 +800,7 @@ def _enumerate_chiral_assignments(
             prefix_ids = set(elements[: depth + 1])
             for bit in (0, 1):
                 next_bits = bits + (bit,)
-                keys = []
+                keys: list[tuple[ChiralLabel, ...]] = []
                 for action in actions:
                     key = mapped_key(next_bits, action)
                     if {label[:2] for label in key} == prefix_ids:
@@ -801,8 +813,8 @@ def _enumerate_chiral_assignments(
 
         yield from visit(())
 
-    assignments = []
-    seen = set()
+    assignments: list[ChiralAssignment] = []
+    seen: set[tuple[ChiralLabel, ...]] = set()
     for bits in unique_bit_patterns():
         keys = [mapped_key(bits, action) for action in actions]
         canonical = min(keys)
@@ -815,7 +827,7 @@ def _enumerate_chiral_assignments(
                 for (kind, atom), bit in zip(elements, bits)
             )
         )
-        active_centers = {
+        active_centers: set[tuple[str, int]] = {
             ("A", center.center_atom) for center in allene_centers
         }
         for center in tetrahedral_centers:
@@ -848,7 +860,7 @@ def _enumerate_chiral_assignments(
     return tuple(assignments)
 
 
-def analyze_chiral(molecule_obj) -> ChiralAnalysis:
+def analyze_chiral(molecule_obj: molecule.Molecule) -> ChiralAnalysis:
     """四面体・allene-like立体要素と配置割当てを解析する。"""
     bonds = molecule_obj.bonds
     tetrahedral = _find_tetrahedral_centers(bonds)

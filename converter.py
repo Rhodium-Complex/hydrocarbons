@@ -1,21 +1,38 @@
 """炭化水素の結合行列をSMILES文字列へ変換する。"""
 
+from collections.abc import Callable
+
+import numpy as np
+
+import molecule
 import stereochemistry
 from generation_output import CumuleneStereo, StructureVariant
 
 
 BOND_SYMBOLS = {1: "", 2: "=", 3: "#"}
+DirectionalBonds = dict[frozenset[int], str]
+Traversal = tuple[
+    dict[int, int | None],
+    dict[int, list[int]],
+    dict[int, int],
+    set[frozenset[int]],
+    list[frozenset[int]],
+]
+StereoData = list[tuple[stereochemistry.EzDoubleBond, str]]
 
 
 # 通常SMILESとE/Z方向制約
-def _render_smiles(mat, directional_bonds=None):
+def _render_smiles(
+    mat: molecule.Molecule,
+    directional_bonds: DirectionalBonds | None = None,
+) -> str:
     """結合行列を描画し、必要なら指定単結合へ方向記号を付ける。"""
     bonds = mat.bonds
     directional_bonds = directional_bonds or {}
-    parts = [""] * len(bonds)
+    parts: list[str] = [""] * len(bonds)
     ring_placeholder = 1
 
-    def bond_symbol(atom1, atom2, order):
+    def bond_symbol(atom1: int, atom2: int, order: int) -> str:
         return directional_bonds.get(
             frozenset((atom1, atom2)),
             BOND_SYMBOLS[order],
@@ -37,7 +54,7 @@ def _render_smiles(mat, directional_bonds=None):
                 parts[atom] = bond_symbol(neighbor, atom, order) + parts[atom]
             has_parent = True
 
-        children = []
+        children: list[str] = []
         for neighbor in range(len(bonds) - 1, atom - 1, -1):
             if bonds[atom][neighbor] != 0 and parts[neighbor]:
                 children.append(parts[neighbor])
@@ -58,13 +75,17 @@ def _render_smiles(mat, directional_bonds=None):
     return smiles
 
 
-def _stereo_data(mat, labels, analysis):
+def _stereo_data(
+    mat: molecule.Molecule,
+    labels: tuple[stereochemistry.EzLabel, ...],
+    analysis: stereochemistry.EzAnalysis,
+) -> StereoData | None:
     """配置ラベルをスラッシュSMILESで表現可能な二重結合へ対応付ける。"""
     by_edge = {
         (double_bond.atom1, double_bond.atom2): double_bond
         for double_bond in analysis.all_double_bonds
     }
-    resolved = []
+    resolved: StereoData = []
     for atom1, atom2, label in labels:
         double_bond = by_edge.get((min(atom1, atom2), max(atom1, atom2)))
         if double_bond is None or not double_bond.has_carbon_high_ligands:
@@ -78,9 +99,14 @@ def _stereo_data(mat, labels, analysis):
     return resolved
 
 
-def _solve_directional_bonds(stereo_data, edge_reversed):
+def _solve_directional_bonds(
+    stereo_data: StereoData,
+    edge_reversed: Callable[[int, int], bool | None],
+) -> DirectionalBonds | None:
     """複数のE/Z制約を同時に満たす相対的なスラッシュ方向を解く。"""
-    adjacency = {}
+    adjacency: dict[
+        frozenset[int], list[tuple[frozenset[int], bool]]
+    ] = {}
     for double_bond, label in stereo_data:
         edge1 = frozenset((double_bond.high_ligand1, double_bond.atom1))
         edge2 = frozenset((double_bond.atom2, double_bond.high_ligand2))
@@ -92,12 +118,12 @@ def _solve_directional_bonds(stereo_data, edge_reversed):
         adjacency.setdefault(edge1, []).append((edge2, differs))
         adjacency.setdefault(edge2, []).append((edge1, differs))
 
-    marks = {}
+    marks: dict[frozenset[int], bool] = {}
     for start in sorted(adjacency, key=lambda edge: tuple(sorted(edge))):
         if start in marks:
             continue
         marks[start] = False
-        pending = [start]
+        pending: list[frozenset[int]] = [start]
         while pending:
             edge = pending.pop()
             for other, differs in adjacency[edge]:
@@ -111,7 +137,11 @@ def _solve_directional_bonds(stereo_data, edge_reversed):
     return {edge: "\\" if mark else "/" for edge, mark in marks.items()}
 
 
-def _acyclic_stereo_smiles(mat, assignment, analysis):
+def _acyclic_stereo_smiles(
+    mat: molecule.Molecule,
+    assignment: stereochemistry.EzAssignment,
+    analysis: stereochemistry.EzAnalysis,
+) -> str | None:
     """最初のE/Z結合を起点とする走査で非環状の立体SMILESを描画する。"""
     bonds = mat.bonds
     atom_count = len(bonds)
@@ -121,7 +151,7 @@ def _acyclic_stereo_smiles(mat, assignment, analysis):
     if not stereo_data:
         return None
 
-    preferred_next = {}
+    preferred_next: dict[int, int] = {}
     for double_bond, _label in stereo_data:
         path = (
             double_bond.high_ligand1,
@@ -133,9 +163,11 @@ def _acyclic_stereo_smiles(mat, assignment, analysis):
             preferred_next.setdefault(left, right)
 
     root = stereo_data[0][0].high_ligand1
-    parent = {root: None}
-    children = {atom: [] for atom in range(atom_count)}
-    pending = [root]
+    parent: dict[int, int | None] = {root: None}
+    children: dict[int, list[int]] = {
+        atom: [] for atom in range(atom_count)
+    }
+    pending: list[int] = [root]
     while pending:
         atom = pending.pop()
         for neighbor in sorted(int(value) for value in bonds[atom].nonzero()[0]):
@@ -149,7 +181,7 @@ def _acyclic_stereo_smiles(mat, assignment, analysis):
     if len(parent) != atom_count:
         return None
 
-    def edge_reversed(left, right):
+    def edge_reversed(left: int, right: int) -> bool | None:
         if parent.get(right) == left:
             return False
         if parent.get(left) == right:
@@ -160,7 +192,7 @@ def _acyclic_stereo_smiles(mat, assignment, analysis):
     if directional_bonds is None:
         return None
 
-    def emit(atom):
+    def emit(atom: int) -> str | None:
         continuation = preferred_next.get(atom)
         if continuation not in children[atom]:
             continuation = children[atom][-1] if children[atom] else None
@@ -186,13 +218,18 @@ def _acyclic_stereo_smiles(mat, assignment, analysis):
     return emit(root)
 
 
-def _stereo_traversal(bonds, root):
+def _stereo_traversal(
+    bonds: np.ndarray,
+    root: int,
+) -> Traversal | None:
     """環状立体SMILESの描画に使う決定的な深さ優先走査を構築する。"""
-    parent = {root: None}
-    children = {atom: [] for atom in range(len(bonds))}
-    preorder = []
+    parent: dict[int, int | None] = {root: None}
+    children: dict[int, list[int]] = {
+        atom: [] for atom in range(len(bonds))
+    }
+    preorder: list[int] = []
 
-    def visit(atom):
+    def visit(atom: int) -> None:
         preorder.append(atom)
         for neighbor in sorted(int(value) for value in bonds[atom].nonzero()[0]):
             if neighbor == parent[atom] or neighbor in parent:
@@ -205,13 +242,15 @@ def _stereo_traversal(bonds, root):
     if len(parent) != len(bonds):
         return None
 
-    tree_edges = {
+    tree_edges: set[frozenset[int]] = {
         frozenset((atom, parent_atom))
         for atom, parent_atom in parent.items()
         if parent_atom is not None
     }
-    rank = {atom: index for index, atom in enumerate(preorder)}
-    closure_edges = []
+    rank: dict[int, int] = {
+        atom: index for index, atom in enumerate(preorder)
+    }
+    closure_edges: list[frozenset[int]] = []
     for atom1, row in enumerate(bonds):
         for atom2, bond_order in enumerate(row[atom1 + 1 :], start=atom1 + 1):
             edge = frozenset((atom1, atom2))
@@ -221,13 +260,20 @@ def _stereo_traversal(bonds, root):
 
 
 # 環を含むSMILES走査と原子中心立体表記
-def _render_cyclic_stereo(mat, traversal, directional_bonds, atom_tokens=None):
+def _render_cyclic_stereo(
+    mat: molecule.Molecule,
+    traversal: Traversal,
+    directional_bonds: DirectionalBonds,
+    atom_tokens: dict[int, str] | None = None,
+) -> str:
     """DFS木と方向を考慮した環閉鎖辺を標準SMILESとして描画する。"""
     bonds = mat.bonds
     atom_tokens = atom_tokens or {}
     parent, children, rank, _tree_edges, closure_edges = traversal
     root = next(atom for atom, parent_atom in parent.items() if parent_atom is None)
-    closures = {atom: [] for atom in range(len(bonds))}
+    closures: dict[int, list[str]] = {
+        atom: [] for atom in range(len(bonds))
+    }
     for ring_number, edge in enumerate(closure_edges, start=1):
         atom1, atom2 = sorted(edge, key=lambda atom: rank[atom])
         token = str(ring_number) if ring_number < 10 else f"%{ring_number}"
@@ -235,7 +281,7 @@ def _render_cyclic_stereo(mat, traversal, directional_bonds, atom_tokens=None):
         closures[atom1].append(symbol + token)
         closures[atom2].append(token)
 
-    def emit(atom):
+    def emit(atom: int) -> str:
         result = [atom_tokens.get(atom, "C"), *closures[atom]]
         continuation = children[atom][-1] if children[atom] else None
         for child in children[atom]:
@@ -248,7 +294,12 @@ def _render_cyclic_stereo(mat, traversal, directional_bonds, atom_tokens=None):
     return emit(root)
 
 
-def _edge_reversed(traversal, left, right, bonds=None):
+def _edge_reversed(
+    traversal: Traversal,
+    left: int,
+    right: int,
+    bonds: np.ndarray | None = None,
+) -> bool | None:
     """走査上の辺がleftからrightとは逆向きに出力されるかを返す。"""
     parent, _children, rank, tree_edges, _closure_edges = traversal
     if bonds is not None and bonds[left][right] == 0:
@@ -256,16 +307,21 @@ def _edge_reversed(traversal, left, right, bonds=None):
     edge = frozenset((left, right))
     if edge in tree_edges:
         return parent.get(right) != left
-    return not (rank[left] < rank[right])
+    return rank[left] >= rank[right]
 
 
-def _lexical_neighbors(atom, traversal, hydrogen_count=0):
+def _lexical_neighbors(
+    atom: int,
+    traversal: Traversal,
+    hydrogen_count: int = 0,
+) -> tuple[int, ...]:
     """原子中心のSMILES立体表記で使われる字句順に隣接原子を返す。"""
     parent, children, _, _tree_edges, closure_edges = traversal
-    ordered = [stereochemistry.HYDROGEN_LIGAND] * hydrogen_count
-    if parent[atom] is not None:
-        ordered.append(parent[atom])
-    ring_neighbors = []
+    ordered: list[int] = [stereochemistry.HYDROGEN_LIGAND] * hydrogen_count
+    parent_atom = parent[atom]
+    if parent_atom is not None:
+        ordered.append(parent_atom)
+    ring_neighbors: list[tuple[int, int]] = []
     for ring_number, edge in enumerate(closure_edges, start=1):
         if atom in edge:
             other = next(value for value in edge if value != atom)
@@ -276,15 +332,17 @@ def _lexical_neighbors(atom, traversal, hydrogen_count=0):
 
 
 def _chiral_atom_tokens(
-    chiral_analysis,
-    chiral_assignment,
-    traversal,
-    active_centers=None,
-):
+    chiral_analysis: stereochemistry.ChiralAnalysis,
+    chiral_assignment: stereochemistry.ChiralAssignment,
+    traversal: Traversal,
+    active_centers: frozenset[tuple[str, int]] | None = None,
+) -> dict[int, str]:
     """抽象的な配置ビットを走査順に対応した原子トークンへ変換する。"""
-    labels = {(kind, atom): bit for kind, atom, bit in chiral_assignment.labels}
+    labels: dict[tuple[str, int], int] = {
+        (kind, atom): bit for kind, atom, bit in chiral_assignment.labels
+    }
     active_centers = active_centers or chiral_assignment.active_centers
-    tokens = {}
+    tokens: dict[int, str] = {}
     for center in chiral_analysis.tetrahedral_centers:
         if ("T", center.atom) not in active_centers:
             continue
@@ -298,7 +356,7 @@ def _chiral_atom_tokens(
         )
         if set(lexical) != set(center.ligands) or len(lexical) != 4:
             continue
-        parity = stereochemistry._permutation_is_odd(center.ligands, lexical)
+        parity = stereochemistry.permutation_is_odd(center.ligands, lexical)
         marker = "@@" if bit ^ int(parity) else "@"
         hydrogen = "H" if center.hydrogen_count else ""
         tokens[center.atom] = f"[C{marker}{hydrogen}]"
@@ -328,8 +386,8 @@ def _chiral_atom_tokens(
             center.ligands2
         ):
             continue
-        parity = stereochemistry._permutation_is_odd(center.ligands1, lexical1) ^ (
-            stereochemistry._permutation_is_odd(center.ligands2, lexical2)
+        parity = stereochemistry.permutation_is_odd(center.ligands1, lexical1) ^ (
+            stereochemistry.permutation_is_odd(center.ligands2, lexical2)
         )
         marker = "AL2" if bit ^ int(parity) else "AL1"
         tokens[center.center_atom] = f"[C@{marker}]"
@@ -337,19 +395,19 @@ def _chiral_atom_tokens(
 
 
 def _combined_stereo_smiles(
-    mat,
-    chiral_assignment,
-    chiral_analysis,
-    ez_assignment=None,
-    ez_analysis=None,
-    traversal=None,
-):
+    mat: molecule.Molecule,
+    chiral_assignment: stereochemistry.ChiralAssignment,
+    chiral_analysis: stereochemistry.ChiralAnalysis,
+    ez_assignment: stereochemistry.EzAssignment | None = None,
+    ez_analysis: stereochemistry.EzAnalysis | None = None,
+    traversal: Traversal | None = None,
+) -> str:
     """原子中心立体と表現可能なE/Z制約をまとめて描画する。"""
     traversal = traversal or _stereo_traversal(mat.bonds, 0)
     if traversal is None:
         return _render_smiles(mat)
-    directional_bonds = {}
-    if ez_assignment is not None and ez_assignment.labels:
+    directional_bonds: DirectionalBonds = {}
+    if ez_assignment is not None and ez_assignment.labels and ez_analysis is not None:
         stereo_data = _stereo_data(mat, ez_assignment.labels, ez_analysis)
         if stereo_data:
             solved = _solve_directional_bonds(
@@ -384,7 +442,12 @@ def _combined_stereo_smiles(
 
 
 # 公開変換経路で使用するE/Z描画とフォールバック
-def _cyclic_stereo_smiles(mat, assignment, analysis, traversal=None):
+def _cyclic_stereo_smiles(
+    mat: molecule.Molecule,
+    assignment: stereochemistry.EzAssignment,
+    analysis: stereochemistry.EzAnalysis,
+    traversal: Traversal | None = None,
+) -> str | None:
     """環閉鎖辺を含むアルケンの相対配置制約をすべて描画する。"""
     stereo_data = _stereo_data(mat, assignment.labels, analysis)
     if not stereo_data:
@@ -405,7 +468,12 @@ def _cyclic_stereo_smiles(mat, assignment, analysis, traversal=None):
     return _render_cyclic_stereo(mat, traversal, directional_bonds)
 
 
-def _standard_stereo_smiles(mat, assignment, analysis, cyclic_traversal=None):
+def _standard_stereo_smiles(
+    mat: molecule.Molecule,
+    assignment: stereochemistry.EzAssignment,
+    analysis: stereochemistry.EzAnalysis,
+    cyclic_traversal: Traversal | None = None,
+) -> str | None:
     return _acyclic_stereo_smiles(mat, assignment, analysis) or _cyclic_stereo_smiles(
         mat,
         assignment,
@@ -414,12 +482,16 @@ def _standard_stereo_smiles(mat, assignment, analysis, cyclic_traversal=None):
     )
 
 
-def mat2stereo_smiles(mat, assignment, analysis=None):
+def mat2stereo_smiles(
+    mat: molecule.Molecule,
+    assignment: stereochemistry.EzAssignment,
+    analysis: stereochemistry.EzAnalysis | None = None,
+) -> str:
     """アルケンの相対配置1件を標準的なスラッシュSMILESへ変換する。
 
     E/Zは二つの相対配置を区別する内部ラベルであり、正式なCIP命名を
     保証しない。制約を矛盾なく表現できない場合は立体情報なしのSMILESを返す。
-    """
+"""
     if not assignment.labels:
         return _render_smiles(mat)
     analysis = analysis or stereochemistry.analyze_ez(mat)
@@ -428,7 +500,7 @@ def mat2stereo_smiles(mat, assignment, analysis=None):
 
 
 def mat2smiles_variants(
-    mat,
+    mat: molecule.Molecule,
     include_stereo: bool = False,
     include_tetrahedral_stereo: bool = False,
 ) -> list[str]:
@@ -449,8 +521,8 @@ def mat2smiles_variants(
             if ez_analysis is not None
             else (stereochemistry.EzAssignment(labels=()),)
         )
-        variants = []
-        seen = set()
+        variants: list[str] = []
+        seen: set[str] = set()
         traversal = _stereo_traversal(mat.bonds, 0)
         for ez_assignment in ez_assignments:
             chiral_assignments = stereochemistry.chiral_assignments_for_ez(
@@ -484,8 +556,8 @@ def mat2smiles_variants(
         root = analysis.double_bonds[0].high_ligand1
         cyclic_traversal = _stereo_traversal(bonds, root)
 
-    variants = []
-    non_stereo_smiles = None
+    variants: list[str] = []
+    non_stereo_smiles: str | None = None
     for assignment in analysis.assignments:
         smiles = _standard_stereo_smiles(
             mat,
@@ -498,7 +570,7 @@ def mat2smiles_variants(
             smiles = non_stereo_smiles
         variants.append(smiles)
 
-    seen = set()
+    seen: set[str] = set()
     for index, smiles in enumerate(variants):
         if smiles in seen:
             non_stereo_smiles = non_stereo_smiles or _render_smiles(mat)
@@ -509,10 +581,10 @@ def mat2smiles_variants(
 
 
 def mat2structure_variants(
-    mat,
+    mat: molecule.Molecule,
     include_stereo: bool = False,
     include_tetrahedral_stereo: bool = False,
-):
+) -> list[StructureVariant]:
     """Return directly drawable stereochemical structure variants."""
     base = mat2smiles_variants(mat, include_stereo, include_tetrahedral_stereo)
     bonds = tuple(tuple(int(value) for value in row) for row in mat.bonds)
@@ -521,13 +593,13 @@ def mat2structure_variants(
     analysis = stereochemistry.analyze_cumulene_ez(mat)
     if not analysis.centers:
         return [StructureVariant(value) for value in base]
-    center_by_edge = {
+    center_by_edge: dict[tuple[int, int], stereochemistry.CumuleneEzCenter] = {
         (center.path[0], center.path[-1]): center for center in analysis.centers
     }
-    result = []
+    result: list[StructureVariant] = []
     for value in base:
         for assignment in analysis.assignments:
-            decorations = []
+            decorations: list[CumuleneStereo] = []
             for atom1, atom2, label in assignment.labels:
                 center = center_by_edge[(atom1, atom2)]
                 decorations.append(

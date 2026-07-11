@@ -14,6 +14,7 @@ import molecule
 HYDROGEN_LIGAND = -1
 EzLabel = tuple[int, int, str]
 ChiralLabel = tuple[str, int, int]
+EzAction = dict[tuple[int, int], tuple[tuple[int, int], bool]]
 
 
 @dataclass(frozen=True)
@@ -359,6 +360,10 @@ def _enumerate_assignments(
             else isomorphism.automorphisms(bonds)
         )
     by_edge = _ez_bonds_by_edge(double_bonds)
+    actions = tuple(
+        _compile_ez_action(by_edge, automorphism)
+        for automorphism in automorphisms
+    )
 
     assignments = []
     seen_keys = set()
@@ -374,8 +379,8 @@ def _enumerate_assignments(
             )
         )
         canonical_key = min(
-            _map_ez_labels(assignment.labels, automorphism, by_edge)
-            for automorphism in automorphisms
+            _map_ez_labels(assignment.labels, action)
+            for action in actions
         )
         if canonical_key in seen_keys:
             continue
@@ -393,48 +398,60 @@ def _ez_bonds_by_edge(
     }
 
 
-def _map_ez_labels(
-    labels: tuple[EzLabel, ...],
+def _compile_ez_action(
+    by_edge: dict[tuple[int, int], EzDoubleBond],
     automorphism: tuple[int, ...],
-    by_edge: dict[tuple[int, int], EzDoubleBond] | None = None,
-) -> tuple[EzLabel, ...]:
-    """Map relative E/Z labels, reversing a bit when one reference flips."""
+) -> EzAction:
+    """Compile one automorphism into E/Z edge moves and bit reversals."""
+    action = {}
+    for edge, source in by_edge.items():
+        mapped_atom1 = automorphism[source.atom1]
+        mapped_atom2 = automorphism[source.atom2]
+        mapped_edge = (min(mapped_atom1, mapped_atom2), max(mapped_atom1, mapped_atom2))
+        target = by_edge[mapped_edge]
+        target_ref1 = target.high_ligand1 if target.atom1 == mapped_atom1 else target.high_ligand2
+        target_ref2 = target.high_ligand1 if target.atom1 == mapped_atom2 else target.high_ligand2
+        action[edge] = (
+            mapped_edge,
+            (automorphism[source.high_ligand1] != target_ref1)
+            ^ (automorphism[source.high_ligand2] != target_ref2),
+        )
+    return action
+
+
+def _map_ez_labels(labels: tuple[EzLabel, ...], action: EzAction) -> tuple[EzLabel, ...]:
+    """Map relative E/Z labels with a precompiled automorphism action."""
     mapped_labels = []
     for atom1, atom2, label in labels:
-        mapped_atom1 = automorphism[atom1]
-        mapped_atom2 = automorphism[atom2]
-        mapped_label = label
-        if by_edge is not None:
-            source = by_edge[(min(atom1, atom2), max(atom1, atom2))]
-            target = by_edge[(min(mapped_atom1, mapped_atom2), max(mapped_atom1, mapped_atom2))]
-            target_ref1 = (
-                target.high_ligand1
-                if target.atom1 == mapped_atom1
-                else target.high_ligand2
-            )
-            target_ref2 = (
-                target.high_ligand1
-                if target.atom1 == mapped_atom2
-                else target.high_ligand2
-            )
-            flipped = (
-                automorphism[source.high_ligand1] != target_ref1
-            ) ^ (
-                automorphism[source.high_ligand2] != target_ref2
-            )
-            if flipped:
-                mapped_label = "Z" if label == "E" else "E"
+        mapped_edge, flipped = action[(min(atom1, atom2), max(atom1, atom2))]
+        mapped_label = "Z" if flipped and label == "E" else "E" if flipped else label
         mapped_labels.append(
-            (min(mapped_atom1, mapped_atom2), max(mapped_atom1, mapped_atom2), mapped_label)
+            (*mapped_edge, mapped_label)
         )
     return tuple(sorted(mapped_labels))
+
+
+def _ez_action_for_labels(
+    labels: tuple[EzLabel, ...],
+    automorphism: tuple[int, ...],
+    by_edge: dict[tuple[int, int], EzDoubleBond] | None,
+) -> EzAction:
+    if by_edge is not None:
+        return _compile_ez_action(by_edge, automorphism)
+    return {
+        (min(atom1, atom2), max(atom1, atom2)): (
+            (min(automorphism[atom1], automorphism[atom2]), max(automorphism[atom1], automorphism[atom2])),
+            False,
+        )
+        for atom1, atom2, _label in labels
+    }
 
 
 def _conditional_ez_is_active(
     double_bond: EzDoubleBond,
     labels: tuple[EzLabel, ...],
     automorphisms: tuple[tuple[int, ...], ...],
-    by_edge: dict[tuple[int, int], EzDoubleBond],
+    actions: tuple[EzAction, ...],
 ) -> bool:
     """Return whether existing stereo labels distinguish both alkene ends."""
     raw_labels = tuple(sorted(labels))
@@ -442,10 +459,10 @@ def _conditional_ez_is_active(
     def side_is_distinct(atom: int, reference: int, other: int | None) -> bool:
         if other is None:
             return True
-        for automorphism in automorphisms:
+        for automorphism, action in zip(automorphisms, actions):
             if automorphism[atom] != atom or automorphism[reference] != other:
                 continue
-            if _map_ez_labels(raw_labels, automorphism, by_edge) == raw_labels:
+            if _map_ez_labels(raw_labels, action) == raw_labels:
                 return False
         return True
 
@@ -463,11 +480,15 @@ def _expand_conditional_ez_assignments(
     all_double_bonds: tuple[EzDoubleBond, ...],
 ) -> tuple[EzAssignment, ...]:
     by_edge = _ez_bonds_by_edge(all_double_bonds)
+    actions = tuple(
+        _compile_ez_action(by_edge, automorphism)
+        for automorphism in automorphisms
+    )
     completed = []
     seen_states = set()
 
     def canonical(labels: tuple[EzLabel, ...]) -> tuple[EzLabel, ...]:
-        return min(_map_ez_labels(labels, automorphism, by_edge) for automorphism in automorphisms)
+        return min(_map_ez_labels(labels, action) for action in actions)
 
     def visit(labels: tuple[EzLabel, ...]) -> None:
         labels = canonical(labels)
@@ -479,7 +500,7 @@ def _expand_conditional_ez_assignments(
             double_bond
             for double_bond in conditional_double_bonds
             if (double_bond.atom1, double_bond.atom2) not in assigned_edges
-            and _conditional_ez_is_active(double_bond, labels, automorphisms, by_edge)
+            and _conditional_ez_is_active(double_bond, labels, automorphisms, actions)
         ]
         if not enabled:
             completed.append(EzAssignment(labels))
@@ -493,14 +514,17 @@ def _expand_conditional_ez_assignments(
     return tuple(completed)
 
 
-def analyze_ez(molecule_obj) -> EzAnalysis:
+def analyze_ez(
+    molecule_obj,
+    automorphisms: tuple[tuple[int, ...], ...] | None = None,
+) -> EzAnalysis:
     """1分子についてE/Z候補と配置割当てを解析する。"""
     double_bonds, conditional_double_bonds = _find_ez_double_bonds_for_bonds(
         molecule_obj.bonds
     )
     if conditional_double_bonds and double_bonds:
         all_double_bonds = double_bonds + conditional_double_bonds
-        automorphisms = tuple(isomorphism.automorphisms(molecule_obj.bonds))
+        automorphisms = automorphisms or tuple(isomorphism.automorphisms(molecule_obj.bonds))
         assignments = _expand_conditional_ez_assignments(
             _enumerate_assignments(molecule_obj.bonds, double_bonds, automorphisms),
             conditional_double_bonds,
@@ -866,6 +890,10 @@ def active_chiral_centers(
     )
 
     automorphisms = analysis.automorphisms or tuple(isomorphism.automorphisms(bonds))
+    ez_actions = tuple(
+        _ez_action_for_labels(raw_ez, automorphism, ez_bonds)
+        for automorphism in automorphisms
+    )
     elements = tuple(label[:2] for label in assignment.labels)
     active = {("A", center.center_atom) for center in analysis.allene_centers}
     for center in analysis.tetrahedral_centers:
@@ -873,7 +901,7 @@ def active_chiral_centers(
             label for label in raw_labels if label[:2] != ("T", center.atom)
         )
         has_odd_stabilizer = False
-        for automorphism in automorphisms:
+        for automorphism, ez_action in zip(automorphisms, ez_actions):
             if automorphism[center.atom] != center.atom:
                 continue
             action = _compile_chiral_action(
@@ -889,7 +917,7 @@ def active_chiral_centers(
             )
             if (
                 mapped_other == other_labels
-                and _map_ez_labels(raw_ez, automorphism, ez_bonds) == raw_ez
+                and _map_ez_labels(raw_ez, ez_action) == raw_ez
             ):
                 has_odd_stabilizer = True
                 break
@@ -913,11 +941,15 @@ def chiral_assignments_for_ez(
         if ez_analysis is not None
         else None
     )
+    ez_actions = tuple(
+        _ez_action_for_labels(raw_ez, automorphism, ez_bonds)
+        for automorphism in analysis.automorphisms
+    )
 
     preserving = tuple(
         automorphism
-        for automorphism in analysis.automorphisms
-        if _map_ez_labels(raw_ez, automorphism, ez_bonds) == raw_ez
+        for automorphism, ez_action in zip(analysis.automorphisms, ez_actions)
+        if _map_ez_labels(raw_ez, ez_action) == raw_ez
     )
     return _enumerate_chiral_assignments(
         bonds,

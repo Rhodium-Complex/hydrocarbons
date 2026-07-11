@@ -439,7 +439,11 @@ def mat2smiles_variants(
         chiral_analysis = stereochemistry.analyze_chiral(mat)
         if not chiral_analysis.tetrahedral_centers and not chiral_analysis.allene_centers:
             return mat2smiles_variants(mat, include_stereo, False)
-        ez_analysis = stereochemistry.analyze_ez(mat) if include_stereo else None
+        ez_analysis = (
+            stereochemistry.analyze_ez(mat, chiral_analysis.automorphisms)
+            if include_stereo
+            else None
+        )
         ez_assignments = (
             ez_analysis.assignments
             if ez_analysis is not None

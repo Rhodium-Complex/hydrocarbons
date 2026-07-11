@@ -1,4 +1,4 @@
-"""Late-stage E/Z stereochemistry helpers for hydrocarbon bond matrices."""
+"""炭化水素の結合行列から立体配置を列挙する補助処理。"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -18,16 +18,18 @@ ChiralLabel = tuple[str, int, int]
 
 @dataclass(frozen=True)
 class EzDoubleBond:
-    """A double bond whose two ends have distinguishable ligands."""
+    """両端に区別可能な配位子を持つ二重結合。"""
 
     atom1: int
     atom2: int
     high_ligand1: int
     high_ligand2: int
+    other_ligand1: int | None = None
+    other_ligand2: int | None = None
 
     @property
     def has_carbon_high_ligands(self) -> bool:
-        """Return whether both high-priority ligands are explicit carbons."""
+        """両側の代表配位子が明示的な炭素原子かを返す。"""
         return (
             self.high_ligand1 != HYDROGEN_LIGAND
             and self.high_ligand2 != HYDROGEN_LIGAND
@@ -36,20 +38,20 @@ class EzDoubleBond:
 
 @dataclass(frozen=True)
 class EzAssignment:
-    """E/Z labels assigned to stereogenic double bonds."""
+    """立体配置を持つ二重結合へ割り当てたE/Zラベル群。"""
 
     labels: tuple[EzLabel, ...]
 
     @property
     def single_label(self) -> EzLabel | None:
-        """Return the only E/Z label when this assignment targets one bond."""
+        """割当て対象が1結合だけの場合に、そのE/Zラベルを返す。"""
         if len(self.labels) != 1:
             return None
         return self.labels[0]
 
     @property
     def single_edge(self) -> tuple[int, int] | None:
-        """Return the normalized edge for a single-bond assignment."""
+        """割当て対象が1結合だけの場合に、正規化した辺を返す。"""
         single_label = self.single_label
         if single_label is None:
             return None
@@ -59,28 +61,50 @@ class EzAssignment:
 
 @dataclass(frozen=True)
 class EzAnalysis:
-    """E/Z-capable double bonds and unique assignments for one molecule."""
+    """1分子のE/Z候補二重結合と対称性を除いた配置割当て。"""
 
     double_bonds: tuple[EzDoubleBond, ...]
     assignments: tuple[EzAssignment, ...]
+    conditional_double_bonds: tuple[EzDoubleBond, ...] = ()
+    automorphisms: tuple[tuple[int, ...], ...] = ()
+
+    @property
+    def all_double_bonds(self) -> tuple[EzDoubleBond, ...]:
+        """Return static and configuration-dependent E/Z candidates."""
+        return self.double_bonds + self.conditional_double_bonds
 
     def double_bond_for_assignment(
         self,
         assignment: EzAssignment,
     ) -> EzDoubleBond | None:
-        """Return the double bond described by a single-bond E/Z assignment."""
+        """単一のE/Z割当てが指す二重結合を返す。"""
         edge = assignment.single_edge
         if edge is None:
             return None
-        for double_bond in self.double_bonds:
+        for double_bond in self.all_double_bonds:
             if edge == (double_bond.atom1, double_bond.atom2):
                 return double_bond
         return None
 
 
 @dataclass(frozen=True)
+class CumuleneEzCenter:
+    """Odd cumulene chain with distinguishable ligand pairs at both ends."""
+
+    path: tuple[int, ...]
+    high_ligand1: int
+    high_ligand2: int
+
+
+@dataclass(frozen=True)
+class CumuleneEzAnalysis:
+    centers: tuple[CumuleneEzCenter, ...]
+    assignments: tuple[EzAssignment, ...]
+
+
+@dataclass(frozen=True)
 class TetrahedralCenter:
-    """A tetrahedral carbon and its deterministic four-ligand reference order."""
+    """四面体炭素と、決定的に定めた4配位子の基準順序。"""
 
     atom: int
     ligands: tuple[int, int, int, int]
@@ -89,7 +113,7 @@ class TetrahedralCenter:
 
 @dataclass(frozen=True)
 class AlleneCenter:
-    """An even cumulene chain with distinguishable ligand pairs at both ends."""
+    """両末端に区別可能な配位子対を持つ偶数クムレン鎖。"""
 
     center_atom: int
     path: tuple[int, ...]
@@ -99,7 +123,7 @@ class AlleneCenter:
 
 @dataclass(frozen=True)
 class ChiralAssignment:
-    """Binary configurations for tetrahedral and allene-like centers."""
+    """四面体中心とallene-like中心の二値配置割当て。"""
 
     labels: tuple[ChiralLabel, ...]
     active_centers: frozenset[tuple[str, int]] = frozenset()
@@ -107,7 +131,7 @@ class ChiralAssignment:
 
 @dataclass(frozen=True)
 class ChiralAnalysis:
-    """Atom-centered stereogenic elements and symmetry-unique assignments."""
+    """原子中心の立体要素と、対称性を除いた配置割当て。"""
 
     tetrahedral_centers: tuple[TetrahedralCenter, ...]
     allene_centers: tuple[AlleneCenter, ...]
@@ -115,8 +139,9 @@ class ChiralAnalysis:
     automorphisms: tuple[tuple[int, ...], ...] = ()
 
 
+# 原子・配位子の同一性判定
 def _compressed_color_ids(signatures: list[tuple]) -> list[int]:
-    """Return deterministic dense integer color ids for signatures."""
+    """シグネチャへ決定的で連続した整数の色番号を割り当てる。"""
     color_by_signature = {
         signature: index + 1
         for index, signature in enumerate(sorted(set(signatures)))
@@ -125,7 +150,7 @@ def _compressed_color_ids(signatures: list[tuple]) -> list[int]:
 
 
 def _refined_atom_colors(blocked: np.ndarray) -> list[int]:
-    """Return integer atom colors from Weisfeiler-Lehman style refinement."""
+    """Weisfeiler-Lehman型の反復細分化により原子色を求める。"""
     hydrogens = molecule.implicit_hydrogens(blocked)
     neighbors = [
         tuple(int(neighbor) for neighbor in np.where(blocked[index] > 0)[0])
@@ -219,12 +244,32 @@ def _locally_resolved_high_ligand(ligands: list[int]) -> tuple[bool, int | None]
     return False, None
 
 
-def _find_ez_double_bonds_for_bonds(bonds: np.ndarray) -> tuple[EzDoubleBond, ...]:
+def _other_ligand(ligands: list[int], high_ligand: int) -> int | None:
+    """Return the other ligand in a two-ligand alkene end."""
+    for ligand in ligands:
+        if ligand != high_ligand:
+            return ligand
+    return None
+
+
+# E/Z候補の検出と対称性を考慮した配置列挙
+def _find_ez_double_bonds_for_bonds(
+    bonds: np.ndarray,
+) -> tuple[tuple[EzDoubleBond, ...], tuple[EzDoubleBond, ...]]:
     hydrogens = molecule.implicit_hydrogens(bonds)
+    cumulene_edges = {
+        frozenset((left, right))
+        for path in _double_bond_paths(bonds)
+        if len(path) > 2
+        for left, right in zip(path, path[1:])
+    }
     double_bonds = []
+    conditional_double_bonds = []
     for atom1, bond_row in enumerate(bonds):
         for atom2, bond_order in enumerate(bond_row[atom1 + 1 :], start=atom1 + 1):
             if bond_order != 2:
+                continue
+            if frozenset((atom1, atom2)) in cumulene_edges:
                 continue
 
             ligands1 = _ligands_for_atom(bonds, atom1, atom2, hydrogens)
@@ -242,6 +287,8 @@ def _find_ez_double_bonds_for_bonds(bonds: np.ndarray) -> tuple[EzDoubleBond, ..
                         atom2=atom2,
                         high_ligand1=high1,
                         high_ligand2=high2,
+                        other_ligand1=_other_ligand(ligands1, high1),
+                        other_ligand2=_other_ligand(ligands2, high2),
                     )
                 )
                 continue
@@ -254,23 +301,45 @@ def _find_ez_double_bonds_for_bonds(bonds: np.ndarray) -> tuple[EzDoubleBond, ..
                 high1 = _high_priority_ligand(colors, ligands1)
             if not resolved2:
                 high2 = _high_priority_ligand(colors, ligands2)
-            if high1 is None or high2 is None:
+            if high1 is not None and high2 is not None:
+                double_bonds.append(
+                    EzDoubleBond(
+                        atom1=atom1,
+                        atom2=atom2,
+                        high_ligand1=high1,
+                        high_ligand2=high2,
+                        other_ligand1=_other_ligand(ligands1, high1),
+                        other_ligand2=_other_ligand(ligands2, high2),
+                    )
+                )
                 continue
 
-            double_bonds.append(
+            # A same-colour pair may become distinguishable after another
+            # E/Z assignment.  Keep a deterministic carbon reference for
+            # slash-SMILES rendering, but do not make it a static candidate.
+            carbon_ligands1 = [value for value in ligands1 if value != HYDROGEN_LIGAND]
+            carbon_ligands2 = [value for value in ligands2 if value != HYDROGEN_LIGAND]
+            if not carbon_ligands1 or not carbon_ligands2:
+                continue
+            reference1 = high1 if high1 is not None else min(carbon_ligands1)
+            reference2 = high2 if high2 is not None else min(carbon_ligands2)
+            conditional_double_bonds.append(
                 EzDoubleBond(
                     atom1=atom1,
                     atom2=atom2,
-                    high_ligand1=high1,
-                    high_ligand2=high2,
+                    high_ligand1=reference1,
+                    high_ligand2=reference2,
+                    other_ligand1=_other_ligand(ligands1, reference1),
+                    other_ligand2=_other_ligand(ligands2, reference2),
                 )
             )
-    return tuple(double_bonds)
+    return tuple(double_bonds), tuple(conditional_double_bonds)
 
 
 def _enumerate_assignments(
     bonds: np.ndarray,
     double_bonds: tuple[EzDoubleBond, ...],
+    automorphisms: tuple[tuple[int, ...], ...] | None = None,
 ) -> tuple[EzAssignment, ...]:
     if not double_bonds:
         return (EzAssignment(labels=()),)
@@ -283,29 +352,14 @@ def _enumerate_assignments(
             for label in ("E", "Z")
         )
 
-    colors = _refined_atom_colors(bonds)
-    automorphisms = (
-        [tuple(range(len(bonds)))]
-        if len(set(colors)) == len(colors)
-        else isomorphism.automorphisms(bonds)
-    )
-
-    def assignment_key(
-        assignment: EzAssignment,
-        automorphism: tuple[int, ...],
-    ) -> tuple[EzLabel, ...]:
-        mapped_labels = []
-        for atom1, atom2, label in assignment.labels:
-            mapped_atom1 = automorphism[atom1]
-            mapped_atom2 = automorphism[atom2]
-            mapped_labels.append(
-                (
-                    min(mapped_atom1, mapped_atom2),
-                    max(mapped_atom1, mapped_atom2),
-                    label,
-                )
-            )
-        return tuple(sorted(mapped_labels))
+    if automorphisms is None:
+        colors = _refined_atom_colors(bonds)
+        automorphisms = tuple(
+            [tuple(range(len(bonds)))]
+            if len(set(colors)) == len(colors)
+            else isomorphism.automorphisms(bonds)
+        )
+    by_edge = _ez_bonds_by_edge(double_bonds)
 
     assignments = []
     seen_keys = set()
@@ -321,7 +375,7 @@ def _enumerate_assignments(
             )
         )
         canonical_key = min(
-            assignment_key(assignment, automorphism)
+            _map_ez_labels(assignment.labels, automorphism, by_edge)
             for automorphism in automorphisms
         )
         if canonical_key in seen_keys:
@@ -331,15 +385,173 @@ def _enumerate_assignments(
     return tuple(assignments)
 
 
-def analyze_ez(molecule_obj) -> EzAnalysis:
-    """Return the full E/Z analysis for one molecule."""
-    double_bonds = _find_ez_double_bonds_for_bonds(molecule_obj.bonds)
-    return EzAnalysis(
-        double_bonds=double_bonds,
-        assignments=_enumerate_assignments(molecule_obj.bonds, double_bonds),
+def _ez_bonds_by_edge(
+    double_bonds: tuple[EzDoubleBond, ...],
+) -> dict[tuple[int, int], EzDoubleBond]:
+    return {
+        (double_bond.atom1, double_bond.atom2): double_bond
+        for double_bond in double_bonds
+    }
+
+
+def _map_ez_labels(
+    labels: tuple[EzLabel, ...],
+    automorphism: tuple[int, ...],
+    by_edge: dict[tuple[int, int], EzDoubleBond] | None = None,
+) -> tuple[EzLabel, ...]:
+    """Map relative E/Z labels, reversing a bit when one reference flips."""
+    mapped_labels = []
+    for atom1, atom2, label in labels:
+        mapped_atom1 = automorphism[atom1]
+        mapped_atom2 = automorphism[atom2]
+        mapped_label = label
+        if by_edge is not None:
+            source = by_edge[(min(atom1, atom2), max(atom1, atom2))]
+            target = by_edge[(min(mapped_atom1, mapped_atom2), max(mapped_atom1, mapped_atom2))]
+            target_ref1 = (
+                target.high_ligand1
+                if target.atom1 == mapped_atom1
+                else target.high_ligand2
+            )
+            target_ref2 = (
+                target.high_ligand1
+                if target.atom1 == mapped_atom2
+                else target.high_ligand2
+            )
+            flipped = (
+                automorphism[source.high_ligand1] != target_ref1
+            ) ^ (
+                automorphism[source.high_ligand2] != target_ref2
+            )
+            if flipped:
+                mapped_label = "Z" if label == "E" else "E"
+        mapped_labels.append(
+            (min(mapped_atom1, mapped_atom2), max(mapped_atom1, mapped_atom2), mapped_label)
+        )
+    return tuple(sorted(mapped_labels))
+
+
+def _conditional_ez_is_active(
+    double_bond: EzDoubleBond,
+    labels: tuple[EzLabel, ...],
+    automorphisms: tuple[tuple[int, ...], ...],
+    by_edge: dict[tuple[int, int], EzDoubleBond],
+) -> bool:
+    """Return whether existing stereo labels distinguish both alkene ends."""
+    raw_labels = tuple(sorted(labels))
+
+    def side_is_distinct(atom: int, reference: int, other: int | None) -> bool:
+        if other is None:
+            return True
+        for automorphism in automorphisms:
+            if automorphism[atom] != atom or automorphism[reference] != other:
+                continue
+            if _map_ez_labels(raw_labels, automorphism, by_edge) == raw_labels:
+                return False
+        return True
+
+    return side_is_distinct(
+        double_bond.atom1, double_bond.high_ligand1, double_bond.other_ligand1
+    ) and side_is_distinct(
+        double_bond.atom2, double_bond.high_ligand2, double_bond.other_ligand2
     )
 
 
+def _expand_conditional_ez_assignments(
+    static_assignments: tuple[EzAssignment, ...],
+    conditional_double_bonds: tuple[EzDoubleBond, ...],
+    automorphisms: tuple[tuple[int, ...], ...],
+    all_double_bonds: tuple[EzDoubleBond, ...],
+) -> tuple[EzAssignment, ...]:
+    if not conditional_double_bonds:
+        return static_assignments
+    by_edge = _ez_bonds_by_edge(all_double_bonds)
+    completed = []
+    seen_states = set()
+
+    def canonical(labels: tuple[EzLabel, ...]) -> tuple[EzLabel, ...]:
+        return min(_map_ez_labels(labels, automorphism, by_edge) for automorphism in automorphisms)
+
+    def visit(labels: tuple[EzLabel, ...]) -> None:
+        labels = canonical(labels)
+        if labels in seen_states:
+            return
+        seen_states.add(labels)
+        assigned_edges = {(atom1, atom2) for atom1, atom2, _label in labels}
+        enabled = [
+            double_bond
+            for double_bond in conditional_double_bonds
+            if (double_bond.atom1, double_bond.atom2) not in assigned_edges
+            and _conditional_ez_is_active(double_bond, labels, automorphisms, by_edge)
+        ]
+        if not enabled:
+            completed.append(EzAssignment(labels))
+            return
+        double_bond = enabled[0]
+        for label in ("E", "Z"):
+            visit(tuple(sorted((*labels, (double_bond.atom1, double_bond.atom2, label)))))
+
+    for assignment in static_assignments:
+        visit(assignment.labels)
+    return tuple(completed)
+
+
+def analyze_ez(molecule_obj) -> EzAnalysis:
+    """1分子についてE/Z候補と配置割当てを解析する。"""
+    double_bonds, conditional_double_bonds = _find_ez_double_bonds_for_bonds(
+        molecule_obj.bonds
+    )
+    all_double_bonds = double_bonds + conditional_double_bonds
+    automorphisms = tuple(isomorphism.automorphisms(molecule_obj.bonds))
+    assignments = _expand_conditional_ez_assignments(
+        _enumerate_assignments(molecule_obj.bonds, double_bonds, automorphisms),
+        conditional_double_bonds,
+        automorphisms,
+        all_double_bonds,
+    )
+    return EzAnalysis(
+        double_bonds=double_bonds,
+        assignments=assignments,
+        conditional_double_bonds=conditional_double_bonds,
+        automorphisms=automorphisms,
+    )
+
+
+def analyze_cumulene_ez(molecule_obj) -> CumuleneEzAnalysis:
+    """Return symmetry-unique E/Z assignments for odd cumulene chains."""
+    bonds = molecule_obj.bonds
+    hydrogens = molecule.implicit_hydrogens(bonds)
+    centers = []
+    for raw_path in _double_bond_paths(bonds):
+        double_bond_count = len(raw_path) - 1
+        if double_bond_count < 3 or double_bond_count % 2 == 0:
+            continue
+        path = raw_path if raw_path[0] < raw_path[-1] else tuple(reversed(raw_path))
+        ligands1 = _terminal_ligands(bonds, path[0], path[1], hydrogens)
+        ligands2 = _terminal_ligands(bonds, path[-1], path[-2], hydrogens)
+        if len(ligands1) != 2 or len(ligands2) != 2:
+            continue
+        blocked = bonds.copy()
+        for left, right in zip(path, path[1:]):
+            blocked[left][right] = blocked[right][left] = 0
+        colors = _refined_atom_colors(blocked)
+        high1 = _high_priority_ligand(colors, ligands1)
+        high2 = _high_priority_ligand(colors, ligands2)
+        if high1 is None or high2 is None:
+            continue
+        centers.append(CumuleneEzCenter(path, high1, high2))
+
+    pseudo_bonds = tuple(
+        EzDoubleBond(center.path[0], center.path[-1], center.high_ligand1, center.high_ligand2)
+        for center in centers
+    )
+    return CumuleneEzAnalysis(
+        centers=tuple(centers),
+        assignments=_enumerate_assignments(bonds, pseudo_bonds),
+    )
+
+
+# 四面体中心・allene-like中心の検出
 def _ligand_order(colors: list[int], ligands: list[int]) -> tuple[int, ...] | None:
     signatures = [
         (0, ligand) if ligand == HYDROGEN_LIGAND else (colors[ligand] + 1, ligand)
@@ -468,8 +680,9 @@ def _map_ligand(ligand: int, automorphism: tuple[int, ...]) -> int:
     return ligand if ligand == HYDROGEN_LIGAND else automorphism[ligand]
 
 
+# 自己同型写像による原子中心配置の変換と列挙
 def _compile_chiral_action(elements, tetra_by_atom, allene_by_center, automorphism):
-    """Compile one automorphism into mapped centers and configuration parity."""
+    """1つの自己同型写像を移動先中心と配置反転の有無へ変換する。"""
     action = []
     for kind, atom in elements:
         mapped_atom = automorphism[atom]
@@ -505,19 +718,6 @@ def _map_chiral_labels(labels, action):
         sorted(
             (kind, mapped_atom, bit ^ parity)
             for (_kind, _atom, bit), (kind, mapped_atom, parity) in zip(labels, action)
-        )
-    )
-
-
-def _map_ez_labels(labels, automorphism):
-    return tuple(
-        sorted(
-            (
-                min(automorphism[atom1], automorphism[atom2]),
-                max(automorphism[atom1], automorphism[atom2]),
-                label,
-            )
-            for atom1, atom2, label in labels
         )
     )
 
@@ -624,7 +824,7 @@ def _enumerate_chiral_assignments(
 
 
 def analyze_chiral(molecule_obj) -> ChiralAnalysis:
-    """Return tetrahedral and allene-like stereogenic elements and assignments."""
+    """四面体・allene-like立体要素と配置割当てを解析する。"""
     bonds = molecule_obj.bonds
     tetrahedral = _find_tetrahedral_centers(bonds)
     allenes = _find_allene_centers(bonds)
@@ -652,7 +852,7 @@ def active_chiral_centers(
     assignment: ChiralAssignment,
     ez_assignment: EzAssignment | None = None,
 ) -> frozenset[tuple[str, int]]:
-    """Return centers active after all selected stereo decorations are applied."""
+    """選択した全立体配置を考慮した後に有効となる中心を返す。"""
     tetra_by_atom = {center.atom: center for center in analysis.tetrahedral_centers}
     allene_by_center = {center.center_atom: center for center in analysis.allene_centers}
     raw_labels = tuple(sorted(assignment.labels))
@@ -696,7 +896,7 @@ def chiral_assignments_for_ez(
     analysis: ChiralAnalysis,
     ez_assignment: EzAssignment,
 ) -> tuple[ChiralAssignment, ...]:
-    """Enumerate chiral configurations under automorphisms preserving E/Z labels."""
+    """E/Zラベルを保存する自己同型写像の下で原子中心配置を列挙する。"""
     if not ez_assignment.labels:
         return analysis.assignments
     raw_ez = tuple(sorted(ez_assignment.labels))

@@ -6,13 +6,12 @@ import importlib
 import re
 from pathlib import Path
 import textwrap
-from typing import Any
 
 import generation_output
 import structure_export_layout as layout
 
-PAGE_WIDTH_MM = 176
-PAGE_HEIGHT_MM = 250
+PAGE_WIDTH_MM = 142
+PAGE_HEIGHT_MM = 219
 SVG_NAMESPACE = "http://www.w3.org/2000/svg"
 DEFAULT_OUTPUT_DIR = Path("outputs")
 DEFAULT_SVG_OUTPUT_PREFIX = DEFAULT_OUTPUT_DIR / "structures_b5"
@@ -22,11 +21,12 @@ def _load_svg_dependencies():
     try:
         chem = importlib.import_module("rdkit.Chem")
         draw2d = importlib.import_module("rdkit.Chem.Draw.rdMolDraw2D")
+        depictor = importlib.import_module("rdkit.Chem.rdDepictor")
     except ImportError as exc:
         raise RuntimeError(
             "SVG export requires RDKit. Install it with: pip install rdkit"
         ) from exc
-    return chem, draw2d
+    return chem, draw2d, depictor
 
 
 def _strip_svg_wrapper(svg_text: str) -> str:
@@ -36,20 +36,13 @@ def _strip_svg_wrapper(svg_text: str) -> str:
     return svg_text.strip()
 
 
-def _smiles_to_svg_fragment(
-    smiles: str,
-    image_size: int,
-    chem: Any,
-    draw2d: Any,
-) -> str | None:
-    mol = chem.MolFromSmiles(smiles)
+def _variant_to_svg_fragment(variant, image_size, chem, draw2d, depictor):
+    mol = layout.prepare_variant_molecule(variant, chem, depictor)
     if mol is None:
         return None
-
     drawer = draw2d.MolDraw2DSVG(image_size, image_size)
-    options = drawer.drawOptions()
-    options.bondLineWidth = layout.STRUCTURE_BOND_LINE_WIDTH
-    draw2d.PrepareAndDrawMolecule(drawer, mol)
+    drawer.drawOptions().bondLineWidth = layout.STRUCTURE_BOND_LINE_WIDTH
+    drawer.DrawMolecule(mol)
     drawer.FinishDrawing()
     return _strip_svg_wrapper(drawer.GetDrawingText())
 
@@ -88,7 +81,7 @@ def export_formula_smiles_svg_pages(
     report_warnings: bool = True,
 ) -> list[Path]:
     """Write formula-grouped SMILES structures to editable B5 SVG pages."""
-    chem, draw2d = _load_svg_dependencies()
+    chem, draw2d, depictor = _load_svg_dependencies()
     cells = layout.build_structure_cells(groups)
     formula_lookup = layout.build_formula_lookup(cells)
     page_width, page_height = layout.PAGE_SIZE
@@ -135,7 +128,7 @@ def export_formula_smiles_svg_pages(
                         cell.text,
                         x + cell_width / 2,
                         y + cell_height / 2,
-                        10,
+                        8,
                         "bold",
                     )
                 )
@@ -143,21 +136,15 @@ def export_formula_smiles_svg_pages(
 
             if report_warnings:
                 with layout.capture_rdkit_warnings() as warnings:
-                    fragment = _smiles_to_svg_fragment(
-                        cell.text,
-                        image_pixels,
-                        chem,
-                        draw2d,
+                    fragment = _variant_to_svg_fragment(
+                        cell.variant, image_pixels, chem, draw2d, depictor
                     )
                 layout.report_cell_warnings(warnings, position, cell.text)
             else:
                 rd_base = importlib.import_module("rdkit.rdBase")
                 with rd_base.BlockLogs():
-                    fragment = _smiles_to_svg_fragment(
-                        cell.text,
-                        image_pixels,
-                        chem,
-                        draw2d,
+                    fragment = _variant_to_svg_fragment(
+                        cell.variant, image_pixels, chem, draw2d, depictor
                     )
             if fragment is None:
                 elements.append(_fallback_text(cell.text, x, y, cell_width, cell_height))

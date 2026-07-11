@@ -189,7 +189,7 @@ class GenerationCorrectnessTests(unittest.TestCase):
             [group.label for group in groups],
             ["CH4", "C2H6", "C2H4", "C2H2", "C2H0"],
         )
-        smiles_by_label = {group.label: group.smiles for group in groups}
+        smiles_by_label = {group.label: [item.smiles for item in group.variants] for group in groups}
         self.assertEqual(smiles_by_label["CH4"], ["C"])
         self.assertIn("CC", smiles_by_label["C2H6"])
         self.assertIn("C=C", smiles_by_label["C2H4"])
@@ -479,10 +479,10 @@ class GenerationCorrectnessTests(unittest.TestCase):
         )
 
         default_c4h8 = {
-            group.label: group.smiles for group in default_groups
+            group.label: [item.smiles for item in group.variants] for group in default_groups
         }["C4H8"]
         stereo_c4h8 = {
-            group.label: group.smiles for group in stereo_groups
+            group.label: [item.smiles for item in group.variants] for group in stereo_groups
         }["C4H8"]
         self.assertEqual(len(default_c4h8), 5)
         self.assertGreater(len(stereo_c4h8), len(default_c4h8))
@@ -673,6 +673,21 @@ class GenerationCorrectnessTests(unittest.TestCase):
 
         self.assertEqual(stereochemistry.analyze_chiral(molecule_obj).allene_centers, ())
 
+    def test_odd_cumulene_has_two_ez_variants(self):
+        bonds = np.zeros((6, 6), dtype=int)
+        for atom1, atom2, order in (
+            (0, 1, 2), (1, 2, 2), (2, 3, 2), (0, 4, 1), (3, 5, 1)
+        ):
+            bonds[atom1][atom2] = bonds[atom2][atom1] = order
+        variants = converter.mat2structure_variants(
+            molecule.Molecule(bonds), include_stereo=True
+        )
+        self.assertEqual(len(variants), 2)
+        self.assertEqual(
+            [variant.cumulenes[0].configuration for variant in variants],
+            ["E", "Z"],
+        )
+
     def test_extended_even_cumulene_is_allene_like(self):
         bonds = np.zeros((7, 7), dtype=int)
         for atom1, atom2, order in (
@@ -778,7 +793,7 @@ class GenerationCorrectnessTests(unittest.TestCase):
             include_tetrahedral_stereo=True,
         )
 
-        values = [smiles for group in groups for smiles in group.smiles]
+        values = [item.smiles for group in groups for item in group.variants]
         self.assertTrue(any("@" in smiles for smiles in values))
 
     def test_pipeline_workers_one_uses_sequential_map(self):

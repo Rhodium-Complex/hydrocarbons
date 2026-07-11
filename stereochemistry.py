@@ -66,7 +66,6 @@ class EzAnalysis:
     double_bonds: tuple[EzDoubleBond, ...]
     assignments: tuple[EzAssignment, ...]
     conditional_double_bonds: tuple[EzDoubleBond, ...] = ()
-    automorphisms: tuple[tuple[int, ...], ...] = ()
 
     @property
     def all_double_bonds(self) -> tuple[EzDoubleBond, ...]:
@@ -463,8 +462,6 @@ def _expand_conditional_ez_assignments(
     automorphisms: tuple[tuple[int, ...], ...],
     all_double_bonds: tuple[EzDoubleBond, ...],
 ) -> tuple[EzAssignment, ...]:
-    if not conditional_double_bonds:
-        return static_assignments
     by_edge = _ez_bonds_by_edge(all_double_bonds)
     completed = []
     seen_states = set()
@@ -501,19 +498,23 @@ def analyze_ez(molecule_obj) -> EzAnalysis:
     double_bonds, conditional_double_bonds = _find_ez_double_bonds_for_bonds(
         molecule_obj.bonds
     )
-    all_double_bonds = double_bonds + conditional_double_bonds
-    automorphisms = tuple(isomorphism.automorphisms(molecule_obj.bonds))
-    assignments = _expand_conditional_ez_assignments(
-        _enumerate_assignments(molecule_obj.bonds, double_bonds, automorphisms),
-        conditional_double_bonds,
-        automorphisms,
-        all_double_bonds,
-    )
+    if conditional_double_bonds and double_bonds:
+        all_double_bonds = double_bonds + conditional_double_bonds
+        automorphisms = tuple(isomorphism.automorphisms(molecule_obj.bonds))
+        assignments = _expand_conditional_ez_assignments(
+            _enumerate_assignments(molecule_obj.bonds, double_bonds, automorphisms),
+            conditional_double_bonds,
+            automorphisms,
+            all_double_bonds,
+        )
+    else:
+        # No prior E/Z decoration can activate a conditional center.  Retain
+        # the previous WL fast path for the overwhelmingly common case.
+        assignments = _enumerate_assignments(molecule_obj.bonds, double_bonds)
     return EzAnalysis(
         double_bonds=double_bonds,
         assignments=assignments,
         conditional_double_bonds=conditional_double_bonds,
-        automorphisms=automorphisms,
     )
 
 
@@ -851,12 +852,18 @@ def active_chiral_centers(
     analysis: ChiralAnalysis,
     assignment: ChiralAssignment,
     ez_assignment: EzAssignment | None = None,
+    ez_analysis: EzAnalysis | None = None,
 ) -> frozenset[tuple[str, int]]:
     """選択した全立体配置を考慮した後に有効となる中心を返す。"""
     tetra_by_atom = {center.atom: center for center in analysis.tetrahedral_centers}
     allene_by_center = {center.center_atom: center for center in analysis.allene_centers}
     raw_labels = tuple(sorted(assignment.labels))
     raw_ez = tuple(sorted(ez_assignment.labels)) if ez_assignment is not None else ()
+    ez_bonds = (
+        _ez_bonds_by_edge(ez_analysis.all_double_bonds)
+        if ez_analysis is not None
+        else None
+    )
 
     automorphisms = analysis.automorphisms or tuple(isomorphism.automorphisms(bonds))
     elements = tuple(label[:2] for label in assignment.labels)
@@ -882,7 +889,7 @@ def active_chiral_centers(
             )
             if (
                 mapped_other == other_labels
-                and _map_ez_labels(raw_ez, automorphism) == raw_ez
+                and _map_ez_labels(raw_ez, automorphism, ez_bonds) == raw_ez
             ):
                 has_odd_stabilizer = True
                 break
@@ -895,16 +902,22 @@ def chiral_assignments_for_ez(
     bonds: np.ndarray,
     analysis: ChiralAnalysis,
     ez_assignment: EzAssignment,
+    ez_analysis: EzAnalysis | None = None,
 ) -> tuple[ChiralAssignment, ...]:
     """E/Zラベルを保存する自己同型写像の下で原子中心配置を列挙する。"""
     if not ez_assignment.labels:
         return analysis.assignments
     raw_ez = tuple(sorted(ez_assignment.labels))
+    ez_bonds = (
+        _ez_bonds_by_edge(ez_analysis.all_double_bonds)
+        if ez_analysis is not None
+        else None
+    )
 
     preserving = tuple(
         automorphism
         for automorphism in analysis.automorphisms
-        if _map_ez_labels(raw_ez, automorphism) == raw_ez
+        if _map_ez_labels(raw_ez, automorphism, ez_bonds) == raw_ez
     )
     return _enumerate_chiral_assignments(
         bonds,

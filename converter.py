@@ -62,7 +62,7 @@ def _stereo_data(mat, labels, analysis):
     """配置ラベルをスラッシュSMILESで表現可能な二重結合へ対応付ける。"""
     by_edge = {
         (double_bond.atom1, double_bond.atom2): double_bond
-        for double_bond in analysis.double_bonds
+        for double_bond in analysis.all_double_bonds
     }
     resolved = []
     for atom1, atom2, label in labels:
@@ -364,6 +364,7 @@ def _combined_stereo_smiles(
             chiral_analysis,
             chiral_assignment,
             ez_assignment,
+            ez_analysis,
         )
         if ez_assignment is not None and ez_assignment.labels
         else chiral_assignment.active_centers
@@ -452,6 +453,7 @@ def mat2smiles_variants(
                 mat.bonds,
                 chiral_analysis,
                 ez_assignment,
+                ez_analysis,
             )
             for chiral_assignment in chiral_assignments:
                 smiles = _combined_stereo_smiles(

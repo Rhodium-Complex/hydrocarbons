@@ -345,6 +345,67 @@ class GenerationCorrectnessTests(unittest.TestCase):
         )
         self.assertTrue(all("[E:" not in text and "[Z:" not in text for text in smiles))
 
+    def test_configuration_dependent_ez_center_adds_two_mixed_variants(self):
+        """A mixed outer E/Z pair activates the otherwise symmetric alkene."""
+        bonds = np.zeros((9, 9), dtype=int)
+        for atom1, atom2, order in (
+            (0, 1, 1), (1, 2, 2), (2, 3, 1), (3, 4, 2),
+            (4, 5, 1), (3, 6, 1), (6, 7, 2), (7, 8, 1),
+        ):
+            bonds[atom1][atom2] = bonds[atom2][atom1] = order
+        molecule_obj = molecule.Molecule(bonds)
+
+        analysis = stereochemistry.analyze_ez(molecule_obj)
+        smiles = converter.mat2smiles_variants(molecule_obj, include_stereo=True)
+
+        self.assertEqual(len(analysis.double_bonds), 2)
+        self.assertEqual(len(analysis.conditional_double_bonds), 1)
+        self.assertEqual(len(analysis.assignments), 4)
+        self.assertEqual(len(smiles), 4)
+        self.assertEqual(len(set(smiles)), 4)
+
+        if importlib.util.find_spec("rdkit"):
+            from rdkit import Chem
+            self.assertTrue(all(Chem.MolFromSmiles(value) is not None for value in smiles))
+
+    def test_mixed_ez_configuration_activates_tetrahedral_center(self):
+        """CC=CC(C)C=CC gains a tetrahedral pair only for mixed E/Z."""
+        bonds = np.zeros((8, 8), dtype=int)
+        for atom1, atom2, order in (
+            (0, 1, 1), (1, 2, 2), (2, 3, 1), (3, 4, 1),
+            (3, 5, 1), (5, 6, 2), (6, 7, 1),
+        ):
+            bonds[atom1][atom2] = bonds[atom2][atom1] = order
+        molecule_obj = molecule.Molecule(bonds)
+
+        ez_analysis = stereochemistry.analyze_ez(molecule_obj)
+        chiral_analysis = stereochemistry.analyze_chiral(molecule_obj)
+        ez_only = converter.mat2smiles_variants(molecule_obj, include_stereo=True)
+        combined = converter.mat2smiles_variants(
+            molecule_obj,
+            include_stereo=True,
+            include_tetrahedral_stereo=True,
+        )
+
+        self.assertEqual(len(ez_only), 3)
+        self.assertEqual(len(combined), 4)
+        mixed = next(
+            assignment
+            for assignment in ez_analysis.assignments
+            if {label for _atom1, _atom2, label in assignment.labels} == {"E", "Z"}
+        )
+        chiral_assignments = stereochemistry.chiral_assignments_for_ez(
+            bonds, chiral_analysis, mixed, ez_analysis
+        )
+        active = [
+            stereochemistry.active_chiral_centers(
+                bonds, chiral_analysis, assignment, mixed, ez_analysis
+            )
+            for assignment in chiral_assignments
+        ]
+        self.assertTrue(all(("T", 3) in centers for centers in active))
+        self.assertEqual(sum("[C@" in value for value in combined), 2)
+
     def test_branched_diene_keeps_standard_slash_stereo(self):
         """Test that branching does not force multiple E/Z labels into the suffix."""
         bonds = np.zeros((9, 9), dtype=int)

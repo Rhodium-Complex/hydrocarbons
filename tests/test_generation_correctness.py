@@ -1,8 +1,15 @@
-""" test cases to verify the correctness of the hydrocarbon generation pipeline. """
+"""Test cases to verify the correctness of the hydrocarbon generation pipeline."""
+# The project modules and RDKit currently do not expose complete static stubs.
+# Keep strict checking for the test logic while documenting those boundary gaps.
+# pyright: reportUnknownParameterType=false, reportMissingParameterType=false, reportUnknownArgumentType=false, reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnnecessaryComparison=false, reportPrivateUsage=false
+# pylint: disable=import-outside-toplevel, line-too-long, missing-function-docstring
+# pylint: disable=no-member, protected-access, wrong-import-order
 import importlib.util
 import itertools
 import unittest
 from unittest import mock
+
+import numpy as np
 
 import converter
 import deduplication
@@ -11,15 +18,14 @@ import graph_utils
 import isomorphism
 import molecule
 import molecule_transformations
-import numpy as np
 import stereochemistry
 import structure_generator
 
 
-def formula_counts_for_carbon(carbon_count):
+def formula_counts_for_carbon(carbon_count: int) -> list[tuple[int, int]]:
     """Helper function to compute the counts of structures for a given carbon count."""
-    current_carbon_structures = []
-    counts = []
+    current_carbon_structures: list[list[molecule.Molecule]] = []
+    counts: list[tuple[int, int]] = []
     for hydrogen_count in range(0, carbon_count * 2 + 3, 2)[::-1]:
         current_carbon_structures = [
             molecule_transformations.unique_dehydro_mols(structures)

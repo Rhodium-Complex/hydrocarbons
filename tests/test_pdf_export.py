@@ -11,7 +11,7 @@ import structure_export_layout as layout
 class PdfExportTests(unittest.TestCase):
     def test_pdf_cells_include_formula_headers(self):
         groups = [
-            generation_output.FormulaSmilesGroup("CH4", 1, 4, ["C"]),
+            generation_output.FormulaSmilesGroup("CH4", 1, 4, [generation_output.StructureVariant("C")]),
             generation_output.FormulaSmilesGroup("C2H0", 2, 0, []),
         ]
 
@@ -21,20 +21,20 @@ class PdfExportTests(unittest.TestCase):
             cells,
             [
                 layout.StructureCell("formula", "CH4"),
-                layout.StructureCell("smiles", "C"),
+                layout.StructureCell("smiles", "C", groups[0].variants[0]),
                 layout.StructureCell("formula", "C2H0"),
             ],
         )
 
     def test_grid_capacity_and_page_count(self):
-        self.assertAlmostEqual(layout.PAGE_SIZE[0], 176 * 72 / 25.4)
-        self.assertAlmostEqual(layout.PAGE_SIZE[1], 250 * 72 / 25.4)
-        self.assertEqual(layout.GRID_COLUMNS, 10)
-        self.assertEqual(layout.GRID_ROWS, 16)
-        self.assertEqual(layout.GRID_CAPACITY, 160)
+        self.assertAlmostEqual(layout.PAGE_SIZE[0], 142 * 72 / 25.4)
+        self.assertAlmostEqual(layout.PAGE_SIZE[1], 219 * 72 / 25.4)
+        self.assertEqual(layout.GRID_COLUMNS, 16)
+        self.assertEqual(layout.GRID_ROWS, 25)
+        self.assertEqual(layout.GRID_CAPACITY, 400)
         self.assertEqual(layout.page_count_for_cell_count(0), 1)
-        self.assertEqual(layout.page_count_for_cell_count(160), 1)
-        self.assertEqual(layout.page_count_for_cell_count(161), 2)
+        self.assertEqual(layout.page_count_for_cell_count(400), 1)
+        self.assertEqual(layout.page_count_for_cell_count(401), 2)
 
     @unittest.skipUnless(
         importlib.util.find_spec("rdkit")
@@ -44,8 +44,8 @@ class PdfExportTests(unittest.TestCase):
     )
     def test_pdf_export_smoke(self):
         groups = [
-            generation_output.FormulaSmilesGroup("CH4", 1, 4, ["C"]),
-            generation_output.FormulaSmilesGroup("bad", 0, 0, ["not-a-smiles"]),
+            generation_output.FormulaSmilesGroup("CH4", 1, 4, [generation_output.StructureVariant("C")]),
+            generation_output.FormulaSmilesGroup("bad", 0, 0, [generation_output.StructureVariant("not-a-smiles")]),
         ]
 
         with tempfile.TemporaryDirectory() as tmpdir:

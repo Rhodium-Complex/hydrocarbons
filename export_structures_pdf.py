@@ -5,7 +5,6 @@ from io import BytesIO
 import importlib
 from pathlib import Path
 import textwrap
-from typing import Any
 
 import generation_output
 import structure_export_layout as layout
@@ -18,6 +17,7 @@ def _load_pdf_dependencies():
     try:
         chem = importlib.import_module("rdkit.Chem")
         draw2d = importlib.import_module("rdkit.Chem.Draw.rdMolDraw2D")
+        depictor = importlib.import_module("rdkit.Chem.rdDepictor")
         colors = importlib.import_module("reportlab.lib.colors")
         image_reader = importlib.import_module("reportlab.lib.utils").ImageReader
         canvas = importlib.import_module("reportlab.pdfgen.canvas")
@@ -26,23 +26,16 @@ def _load_pdf_dependencies():
             "PDF export requires optional dependencies. "
             "Install them with: pip install rdkit reportlab"
         ) from exc
-    return chem, draw2d, colors, image_reader, canvas
+    return chem, draw2d, depictor, colors, image_reader, canvas
 
 
-def _smiles_to_png_bytes(
-    smiles: str,
-    image_size: int,
-    chem: Any,
-    draw2d: Any,
-) -> bytes | None:
-    mol = chem.MolFromSmiles(smiles)
+def _variant_to_png_bytes(variant, image_size, chem, draw2d, depictor):
+    mol = layout.prepare_variant_molecule(variant, chem, depictor)
     if mol is None:
         return None
-
     drawer = draw2d.MolDraw2DCairo(image_size, image_size)
-    options = drawer.drawOptions()
-    options.bondLineWidth = layout.STRUCTURE_BOND_LINE_WIDTH
-    draw2d.PrepareAndDrawMolecule(drawer, mol)
+    drawer.drawOptions().bondLineWidth = layout.STRUCTURE_BOND_LINE_WIDTH
+    drawer.DrawMolecule(mol)
     drawer.FinishDrawing()
     return drawer.GetDrawingText()
 
@@ -68,7 +61,7 @@ def export_formula_smiles_pdf(
     report_warnings: bool = True,
 ) -> None:
     """Write formula-grouped SMILES structures to a B5 portrait PDF."""
-    chem, draw2d, colors, image_reader, canvas = _load_pdf_dependencies()
+    chem, draw2d, depictor, colors, image_reader, canvas = _load_pdf_dependencies()
     cells = layout.build_structure_cells(groups)
     formula_lookup = layout.build_formula_lookup(cells)
     output_path = Path(output_path)
@@ -99,12 +92,16 @@ def export_formula_smiles_pdf(
 
         if report_warnings:
             with layout.capture_rdkit_warnings() as warnings:
-                png_bytes = _smiles_to_png_bytes(cell.text, image_pixels, chem, draw2d)
+                png_bytes = _variant_to_png_bytes(
+                    cell.variant, image_pixels, chem, draw2d, depictor
+                )
             layout.report_cell_warnings(warnings, position, cell.text)
         else:
             rd_base = importlib.import_module("rdkit.rdBase")
             with rd_base.BlockLogs():
-                png_bytes = _smiles_to_png_bytes(cell.text, image_pixels, chem, draw2d)
+                png_bytes = _variant_to_png_bytes(
+                    cell.variant, image_pixels, chem, draw2d, depictor
+                )
         if png_bytes is None:
             pdf.setFillColor(colors.black)
             _draw_fallback_text(pdf, cell.text, x, y, cell_width, cell_height)

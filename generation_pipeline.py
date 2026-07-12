@@ -9,10 +9,7 @@ from collections.abc import Callable, Iterable, Iterator
 from typing import TypeVar
 
 import converter
-from generation_output import (
-    FormulaSmilesGroup,
-    format_formula_label,
-)
+from generation_output import FormulaSmilesGroup, StructureVariant, format_formula_label
 import molecule
 import molecule_transformations
 import structure_generator
@@ -136,10 +133,11 @@ def _iter_formula_structure_steps(
                 )
 
 
-def _smiles_variants_task(task: tuple[molecule.Molecule, bool]) -> list[str]:
-    """Return SMILES variants for one molecule; separated for process pickling."""
-    molecule_obj, include_stereo = task
-    return converter.mat2smiles_variants(molecule_obj, include_stereo)
+def _structure_variants_task(task: tuple[molecule.Molecule, bool, bool]):
+    molecule_obj, include_stereo, include_tetrahedral_stereo = task
+    return converter.mat2structure_variants(
+        molecule_obj, include_stereo, include_tetrahedral_stereo
+    )
 
 
 def _smiles_chunksize(structure_count: int, workers: int | None) -> int:
@@ -153,46 +151,38 @@ def _smiles_chunksize(structure_count: int, workers: int | None) -> int:
 def _should_parallelize_stereo_smiles(
     structure_count: int,
     include_stereo: bool,
+    include_tetrahedral_stereo: bool,
     workers: int | None,
 ) -> bool:
     """Return whether stereo SMILES conversion is large enough to parallelize."""
     return (
-        include_stereo
+        (include_stereo or include_tetrahedral_stereo)
         and workers != 1
         and structure_count >= MIN_PARALLEL_STEREO_STRUCTURES
     )
 
 
-def _structure_smiles(
+def _structure_outputs(
     structure_groups: MoleculeGroups,
     include_stereo: bool,
+    include_tetrahedral_stereo: bool = False,
     executor: ProcessPoolExecutor | None = None,
     workers: int | None = None,
-) -> list[str]:
-    """Return flat SMILES variants for grouped structures."""
+):
     structures = list(itertools.chain.from_iterable(structure_groups))
-    if (
-        executor is None
-        or not include_stereo
-        or len(structures) < MIN_PARALLEL_STEREO_STRUCTURES
-    ):
-        return list(
-            itertools.chain.from_iterable(
-                converter.mat2smiles_variants(molecule_obj, include_stereo)
-                for molecule_obj in structures
-            )
+    tasks = (
+        (item, include_stereo, include_tetrahedral_stereo) for item in structures
+    )
+    if executor is None or len(structures) < MIN_PARALLEL_STEREO_STRUCTURES:
+        nested = (_structure_variants_task(task) for task in tasks)
+    else:
+        nested = _map_generation_task(
+            executor,
+            _structure_variants_task,
+            tasks,
+            chunksize=_smiles_chunksize(len(structures), workers),
         )
-
-    tasks = ((molecule_obj, include_stereo) for molecule_obj in structures)
-    smiles_variants = _map_generation_task(
-        executor,
-        _smiles_variants_task,
-        tasks,
-        chunksize=_smiles_chunksize(len(structures), workers),
-    )
-    return list(
-        itertools.chain.from_iterable(smiles_variants)
-    )
+    return list(itertools.chain.from_iterable(nested))
 
 
 def _run_generation_pipeline(
@@ -202,6 +192,7 @@ def _run_generation_pipeline(
     include_smiles: bool = False,
     include_methane: bool = True,
     include_stereo: bool = False,
+    include_tetrahedral_stereo: bool = False,
     log_step: Callable[[GenerationStepResult], None] | None = None,
 ) -> list[FormulaSmilesGroup] | None:
     """Run the shared generation loop, optionally collecting SMILES groups."""
@@ -212,7 +203,7 @@ def _run_generation_pipeline(
                 label=format_formula_label(1, 4),
                 carbon_count=1,
                 hydrogen_count=4,
-                smiles=["C"],
+                variants=[StructureVariant("C")],
             )
         )
 
@@ -230,18 +221,20 @@ def _run_generation_pipeline(
                     and _should_parallelize_stereo_smiles(
                         structure_count,
                         include_stereo,
+                        include_tetrahedral_stereo,
                         workers,
                     )
                 ):
                     smiles_executor = stack.enter_context(_executor_context(workers))
-                smiles = _structure_smiles(
+                outputs = _structure_outputs(
                     step.structures,
                     include_stereo,
+                    include_tetrahedral_stereo,
                     executor=smiles_executor,
                     workers=workers,
                 )
                 smiles_seconds = time.perf_counter() - smiles_start
-                output_count = len(smiles)
+                output_count = len(outputs)
                 formula_groups.append(
                     FormulaSmilesGroup(
                         label=format_formula_label(
@@ -250,7 +243,7 @@ def _run_generation_pipeline(
                         ),
                         carbon_count=step.carbon_count,
                         hydrogen_count=step.hydrogen_count,
-                        smiles=smiles,
+                        variants=outputs,
                     )
                 )
 
@@ -297,6 +290,7 @@ def run_generation_smiles_groups(
     include_methane: bool = True,
     include_stereo: bool = False,
     log_step: Callable[[GenerationStepResult], None] | None = None,
+    include_tetrahedral_stereo: bool = False,
 ) -> list[FormulaSmilesGroup]:
     """Generate SMILES strings grouped by molecular formula."""
     formula_groups = _run_generation_pipeline(
@@ -306,6 +300,7 @@ def run_generation_smiles_groups(
         include_smiles=True,
         include_methane=include_methane,
         include_stereo=include_stereo,
+        include_tetrahedral_stereo=include_tetrahedral_stereo,
         log_step=log_step,
     )
     if formula_groups is None:
@@ -318,6 +313,7 @@ def run_export_smiles_groups(
     max_carbon: int,
     workers: int | None = None,
     include_stereo: bool = False,
+    include_tetrahedral_stereo: bool = False,
 ) -> list[FormulaSmilesGroup]:
     """Generate formula-grouped SMILES with standard export logging."""
     return run_generation_smiles_groups(
@@ -326,5 +322,6 @@ def run_export_smiles_groups(
         workers=workers,
         include_methane=True,
         include_stereo=include_stereo,
+        include_tetrahedral_stereo=include_tetrahedral_stereo,
         log_step=print_step_result,
     )

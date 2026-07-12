@@ -5,13 +5,32 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
+class CumuleneStereo:
+    """Drawable relative configuration for one odd cumulene chain."""
+
+    path: tuple[int, ...]
+    high_ligand1: int
+    high_ligand2: int
+    configuration: str
+
+
+@dataclass(frozen=True)
+class StructureVariant:
+    """One stereochemical structure and the data required to draw it."""
+
+    smiles: str
+    bonds: tuple[tuple[int, ...], ...] | None = None
+    cumulenes: tuple[CumuleneStereo, ...] = ()
+
+
+@dataclass(frozen=True)
 class FormulaSmilesGroup:
     """SMILES strings grouped by molecular formula."""
 
     label: str
     carbon_count: int
     hydrogen_count: int
-    smiles: list[str]
+    variants: list[StructureVariant]
 
 
 def format_formula_label(carbon_count: int, hydrogen_count: int) -> str:

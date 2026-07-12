@@ -24,7 +24,7 @@ def benchmark_stereo(
         include_stereo=True,
     )
     elapsed = time.perf_counter() - start
-    output_count = sum(len(group.smiles) for group in groups)
+    output_count = sum(len(group.variants) for group in groups)
     print(
         f"min_carbon={min_carbon} max_carbon={max_carbon} "
         f"workers={workers} stereo_outputs={output_count} "
@@ -32,7 +32,7 @@ def benchmark_stereo(
         flush=True,
     )
     for group in groups:
-        print(f"{group.label} {len(group.smiles)}", flush=True)
+        print(f"{group.label} {len(group.variants)}", flush=True)
 
 
 def parse_args():

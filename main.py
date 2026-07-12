@@ -22,6 +22,7 @@ def main(
     export_format=EXPORT_NONE,
     output=export_structures_pdf.DEFAULT_PDF_OUTPUT,
     output_prefix=export_structures_svg.DEFAULT_SVG_OUTPUT_PREFIX,
+    include_tetrahedral_stereo=False,
 ):
     """Generate hydrocarbon structures and optionally return their SMILES strings."""
     if export_format != EXPORT_NONE:
@@ -30,6 +31,7 @@ def main(
             max_carbon=max_carbon,
             workers=workers,
             include_stereo=include_stereo,
+            include_tetrahedral_stereo=include_tetrahedral_stereo,
         )
         try:
             if export_format == EXPORT_PDF:
@@ -52,6 +54,7 @@ def main(
             max_carbon=max_carbon,
             workers=workers,
             include_stereo=include_stereo,
+            include_tetrahedral_stereo=include_tetrahedral_stereo,
             log_step=generation_pipeline.print_step_result,
         )
     generation_pipeline.run_generation(
@@ -71,6 +74,7 @@ def parse_args():
     parser.add_argument("--workers", type=int, default=None)
     parser.add_argument("--no-smiles", action="store_true")
     parser.add_argument("--include-stereo", action="store_true")
+    parser.add_argument("--include-tetrahedral-stereo", action="store_true")
     parser.add_argument(
         "--export",
         choices=(EXPORT_NONE, EXPORT_PDF, EXPORT_SVG),
@@ -103,6 +107,7 @@ if __name__ == "__main__":
         workers=args.workers,
         include_smiles=not args.no_smiles,
         include_stereo=args.include_stereo,
+        include_tetrahedral_stereo=args.include_tetrahedral_stereo,
         export_format=args.export,
         output=args.output,
         output_prefix=args.output_prefix,

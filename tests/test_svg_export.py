@@ -16,8 +16,8 @@ class SvgExportTests(unittest.TestCase):
 
     def test_svg_export_smoke(self):
         groups = [
-            generation_output.FormulaSmilesGroup("CH4", 1, 4, ["C"]),
-            generation_output.FormulaSmilesGroup("bad", 0, 0, ["not-a-smiles"]),
+            generation_output.FormulaSmilesGroup("CH4", 1, 4, [generation_output.StructureVariant("C")]),
+            generation_output.FormulaSmilesGroup("bad", 0, 0, [generation_output.StructureVariant("not-a-smiles")]),
         ]
 
         with tempfile.TemporaryDirectory() as tmpdir:

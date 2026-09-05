@@ -49,17 +49,29 @@ generation_pipeline.run_generation_smiles_groups(...)
 ```text
 generation_pipeline._run_generation_pipeline(...)
   -> _iter_formula_structure_steps(...)
-     -> molecule_transformations.unique_dehydro_mols(...)
+     -> _dehydro_task(...)
+        -> molecule_transformations.unique_dehydro_mols(...)
+        -> _plain_outputs(...)  [通常SMILESありの場合]
      -> structure_generator.build_carbon_hydrogen_combination(...)
-     -> structure_generator.build_structure(...)
+     -> _build_task(...)
+        -> structure_generator.build_structure(...)
+        -> _plain_outputs(...)  [通常SMILESありの場合]
 ```
 
-`include_smiles=True` の場合は、構造生成の後に SMILES 変換が追加されます。
+通常SMILESは、脱水素・骨格生成の重複除去後に同じワーカー内で生成します。
+タスクは構造とSMILESを返し、親は構造を次の水素数に引き継ぎます。
+脱水素と骨格生成は1つのプロセスプールを共有します。脱水素は約ワーカー数×8の
+バッチ（最大64グループ）にまとめ、未回収バッチはワーカー数×2以下に制限します。
+結果は入力順に回収し、脱水素由来、新規骨格由来の順で結合します。
+`workers=1` はプールを作らず直列で実行します。
+
+立体異性体を含む場合は、構造生成の後に独立したSMILES変換を実行します。
 
 ```text
 generation_pipeline._run_generation_pipeline(include_smiles=True, ...)
-  -> _structure_smiles(...)
-     -> converter.mat2smiles_variants(...)
+  -> _structure_outputs(...)
+     -> converter.mat2structure_variants(...)
+        -> converter.mat2smiles_variants(...)
         -> converter._render_smiles(...)
         -> stereochemistry.analyze_ez(...)      [include_stereo=True のときだけ]
         -> converter.mat2stereo_smiles(...)     [include_stereo=True のときだけ]
@@ -127,10 +139,15 @@ molecule_transformations.unique_dehydro_mols(structures)
 通常の SMILES 出力は次の流れです。
 
 ```text
-generation_pipeline._structure_smiles(...)
-  -> converter.mat2smiles_variants(...)
-     -> converter._render_smiles(...)
+generation_pipeline._plain_outputs(...)
+  -> converter.mat2structure_variants(...)
+     -> converter.mat2smiles_variants(...)
+        -> converter._render_smiles(...)
 ```
+
+通常SMILES統合時は `GenerationStepResult.smiles_fused=True` とし、ログに
+`smiles=fused` を表示します。変換時間は脱水素・骨格生成の時間に含め、独立工程の
+`smiles_seconds` は0です。`--no-smiles` は変換を実行しません。
 
 E/Z 立体を含める場合は、追加で stereochemistry を使います。
 

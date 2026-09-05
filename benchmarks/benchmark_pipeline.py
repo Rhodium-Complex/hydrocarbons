@@ -2,11 +2,18 @@
 import argparse
 from pathlib import Path
 import sys
+import time
 import tracemalloc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import generation_pipeline
+try:
+    from benchmarks.process_memory import ProcessTreeMemory
+except ModuleNotFoundError as exc:
+    if exc.name != "psutil":
+        raise
+    raise SystemExit('Install benchmark dependencies: python -m pip install ".[benchmark]"') from exc
 
 
 def benchmark_pipeline(
@@ -28,20 +35,30 @@ def benchmark_pipeline(
     if trace_memory:
         tracemalloc.start()
     try:
-        if include_smiles:
-            generation_pipeline.run_generation_smiles_groups(
-                min_carbon=min_carbon,
-                max_carbon=max_carbon,
-                workers=workers,
-                log_step=log_step,
-            )
-        else:
-            generation_pipeline.run_generation(
-                min_carbon=min_carbon,
-                max_carbon=max_carbon,
-                workers=workers,
-                log_step=log_step,
-            )
+        with ProcessTreeMemory() as memory:
+            start = time.perf_counter()
+            if include_smiles:
+                outputs = generation_pipeline.run_generation_smiles_groups(
+                    min_carbon=min_carbon,
+                    max_carbon=max_carbon,
+                    workers=workers,
+                    log_step=log_step,
+                )
+            else:
+                outputs = None
+                generation_pipeline.run_generation(
+                    min_carbon=min_carbon,
+                    max_carbon=max_carbon,
+                    workers=workers,
+                    log_step=log_step,
+                )
+            wall_seconds = time.perf_counter() - start
+        print(
+            f"wall_seconds={wall_seconds:.4f} "
+            f"peak_process_tree_rss_bytes={memory.peak_bytes}",
+            flush=True,
+        )
+        del outputs
     finally:
         if trace_memory:
             tracemalloc.stop()

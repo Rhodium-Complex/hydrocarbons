@@ -11,6 +11,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+benchmark = ["psutil>=5.9"]
 pdf = [
     "rdkit>=2023.9",
     "reportlab>=4",

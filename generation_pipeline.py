@@ -1,5 +1,6 @@
 """Pipeline orchestration for hydrocarbon structure generation."""
 from concurrent.futures import ProcessPoolExecutor
+from collections import deque
 from contextlib import ExitStack, nullcontext
 from dataclasses import dataclass
 import itertools
@@ -32,6 +33,7 @@ class GenerationStepResult:
     smiles_seconds: float
     count: int
     total_seconds: float
+    smiles_fused: bool = False
 
 
 @dataclass(frozen=True)
@@ -43,6 +45,7 @@ class _FormulaStructureStep:
     structures: MoleculeGroups
     dehydro_seconds: float
     build_seconds: float
+    outputs: list[StructureVariant] | None = None
 
 
 def count_structures(structure_groups: MoleculeGroups) -> int:
@@ -52,11 +55,12 @@ def count_structures(structure_groups: MoleculeGroups) -> int:
 
 def format_step_result(result: GenerationStepResult) -> str:
     """Format a generation step result using the existing CLI log format."""
+    smiles_timing = "fused" if result.smiles_fused else f"{result.smiles_seconds:>9.4f}s"
     return (
         f"C={result.carbon_count:>2} H={result.hydrogen_count:>2} "
         f"dehydro={result.dehydro_seconds:>9.4f}s "
         f"build={result.build_seconds:>9.4f}s "
-        f"smiles={result.smiles_seconds:>9.4f}s "
+        f"smiles={smiles_timing} "
         f"count={result.count:>7} "
         f"total={result.total_seconds:>9.4f}s"
     )
@@ -72,11 +76,69 @@ def _map_generation_task(
     function: Callable[[TaskInput], TaskOutput],
     iterable: Iterable[TaskInput],
     chunksize: int = 1,
+    workers: int | None = None,
 ) -> Iterator[TaskOutput]:
-    """Map a generation task, using direct iteration for sequential runs."""
+    """Map in input order with at most two uncollected batches per worker."""
     if executor is None:
-        return map(function, iterable)
-    return executor.map(function, iterable, chunksize=chunksize)
+        yield from map(function, iterable)
+        return
+    pending = deque()
+    items = iter(iterable)
+    limit = _worker_count(workers) * 2
+    try:
+        while True:
+            while len(pending) < limit:
+                batch = tuple(itertools.islice(items, chunksize))
+                if not batch:
+                    break
+                pending.append(executor.submit(_run_task_batch, function, batch))
+            if not pending:
+                return
+            yield from pending.popleft().result()
+    finally:
+        for future in pending:
+            future.cancel()
+
+
+def _run_task_batch(function, batch):
+    return [function(item) for item in batch]
+
+
+def _worker_count(workers: int | None) -> int:
+    if workers is not None:
+        return workers
+    cpu_count = getattr(os, "process_cpu_count", os.cpu_count)() or 1
+    return min(cpu_count, 61) if os.name == "nt" else cpu_count
+
+
+def _dehydro_chunksize(group_count: int, workers: int | None) -> int:
+    target_batches = _worker_count(workers) * 8
+    return max(1, min(64, (group_count + target_batches - 1) // target_batches))
+
+
+def _dehydro_task(task):
+    """Convert only the survivors of this group's structural deduplication."""
+    group, fuse_smiles = task
+    structures = molecule_transformations.unique_dehydro_mols(group)
+    outputs = _plain_outputs([structures]) if fuse_smiles else None
+    return structures, outputs
+
+
+def _build_task(task):
+    """Return new skeleton groups and, optionally, their ordinary SMILES."""
+    pattern, fuse_smiles = task
+    structures = structure_generator.build_structure(pattern)
+    outputs = _plain_outputs(structures) if fuse_smiles else None
+    return structures, outputs
+
+
+def _plain_outputs(structures: MoleculeGroups) -> list[StructureVariant]:
+    return [
+        variant
+        for group in structures
+        for item in group
+        for variant in converter.mat2structure_variants(item)
+    ]
 
 
 def _executor_context(workers: int | None):
@@ -89,12 +151,10 @@ def _iter_formula_structure_steps(
     min_carbon: int,
     max_carbon: int,
     workers: int | None = None,
+    fuse_smiles: bool = False,
 ) -> Iterator[_FormulaStructureStep]:
     """Yield generated structures for each formula in the existing order."""
-    with (
-        _executor_context(workers) as dehydro_executor,
-        _executor_context(workers) as structure_executor,
-    ):
+    with _executor_context(workers) as executor:
         for carbon_count in range(min_carbon, max_carbon + 1):
             current_carbon_structures: MoleculeGroups = []
             for hydrogen_count in range(0, carbon_count * 2 + 3, 2)[::-1]:
@@ -103,25 +163,38 @@ def _iter_formula_structure_steps(
                     structures for structures in current_carbon_structures if structures
                 ]
                 future_dehydro = _map_generation_task(
-                    dehydro_executor,
-                    molecule_transformations.unique_dehydro_mols,
-                    current_carbon_structures,
+                    executor,
+                    _dehydro_task,
+                    ((group, fuse_smiles) for group in current_carbon_structures),
+                    chunksize=_dehydro_chunksize(len(current_carbon_structures), workers),
+                    workers=workers,
                 )
-                current_carbon_structures = list(future_dehydro)
+                next_structures = []
+                outputs = [] if fuse_smiles else None
+                for structures, variants in future_dehydro:
+                    next_structures.append(structures)
+                    if outputs is not None:
+                        outputs.extend(variants)
+                current_carbon_structures = next_structures
                 dehydro_seconds = time.perf_counter() - dehydro_start
 
                 build_start = time.perf_counter()
                 future_structure = _map_generation_task(
-                    structure_executor,
-                    structure_generator.build_structure,
-                    structure_generator.build_carbon_hydrogen_combination(
-                        carbon_count,
-                        hydrogen_count,
+                    executor,
+                    _build_task,
+                    (
+                        (pattern, fuse_smiles)
+                        for pattern in structure_generator.build_carbon_hydrogen_combination(
+                            carbon_count, hydrogen_count,
+                        )
                     ),
+                    workers=workers,
                 )
 
-                for structures in future_structure:
+                for structures, variants in future_structure:
                     current_carbon_structures += structures
+                    if outputs is not None:
+                        outputs.extend(variants)
                 build_seconds = time.perf_counter() - build_start
 
                 yield _FormulaStructureStep(
@@ -130,6 +203,7 @@ def _iter_formula_structure_steps(
                     structures=current_carbon_structures,
                     dehydro_seconds=dehydro_seconds,
                     build_seconds=build_seconds,
+                    outputs=outputs,
                 )
 
 
@@ -181,6 +255,7 @@ def _structure_outputs(
             _structure_variants_task,
             tasks,
             chunksize=_smiles_chunksize(len(structures), workers),
+            workers=workers,
         )
     return list(itertools.chain.from_iterable(nested))
 
@@ -209,12 +284,15 @@ def _run_generation_pipeline(
 
     with ExitStack() as stack:
         smiles_executor = None
-        for step in _iter_formula_structure_steps(min_carbon, max_carbon, workers):
+        fuse_smiles = include_smiles and not (include_stereo or include_tetrahedral_stereo)
+        for step in _iter_formula_structure_steps(
+            min_carbon, max_carbon, workers, fuse_smiles=fuse_smiles,
+        ):
             structure_count = count_structures(step.structures)
             smiles_seconds = 0.0
             output_count = structure_count
 
-            if include_smiles:
+            if include_smiles and not fuse_smiles:
                 smiles_start = time.perf_counter()
                 if (
                     smiles_executor is None
@@ -234,6 +312,10 @@ def _run_generation_pipeline(
                     workers=workers,
                 )
                 smiles_seconds = time.perf_counter() - smiles_start
+            elif fuse_smiles:
+                outputs = step.outputs
+
+            if include_smiles:
                 output_count = len(outputs)
                 formula_groups.append(
                     FormulaSmilesGroup(
@@ -259,6 +341,7 @@ def _run_generation_pipeline(
                         total_seconds=(
                             step.dehydro_seconds + step.build_seconds + smiles_seconds
                         ),
+                        smiles_fused=fuse_smiles,
                     )
                 )
 

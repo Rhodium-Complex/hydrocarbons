@@ -21,7 +21,8 @@ Useful options:
 
 - `--min-carbon`: first carbon count to generate.
 - `--max-carbon`: last carbon count to generate.
-- `--workers`: number of worker processes for generation.
+- `--workers`: number of worker processes in the shared generation pool;
+  `1` runs sequentially. Ordinary SMILES conversion runs in the same tasks.
 - `--no-smiles`: skip SMILES conversion and report structure counts only.
 - `--include-stereo`: expand formal E/Z stereoisomers during final SMILES output.
 - `--include-tetrahedral-stereo`: expand tetrahedral-carbon and allene-like
@@ -75,20 +76,45 @@ The PDF export requires the optional `pdf` dependencies.
 .\.venv\Scripts\python.exe -m pip install ".[pdf]"
 ```
 
-The command prints one timing line per carbon/hydrogen step:
+The command prints one timing line per carbon/hydrogen step. Ordinary SMILES
+conversion runs after deduplication inside each dehydrogenation/build task:
+
+```text
+C= 8 H= 6 dehydro=   0.4120s build=   0.2810s smiles=fused count=   7982 total=   0.6930s
+```
+
+With `smiles=fused`, `dehydro` and `build` include SMILES conversion. Stereo
+conversion remains a separate stage with its own timing. With `--no-smiles`,
+conversion is skipped:
 
 ```text
 C= 8 H= 6 dehydro=   1.2144s build=   0.4415s smiles=   0.0000s count=   7982 total=   1.6560s
 ```
 
 ## Benchmarks
+Install the optional benchmark dependency first:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install ".[benchmark]"
+```
+
 Benchmark the full generation pipeline:
 
 ```powershell
 .\.venv\Scripts\python.exe -u benchmarks\benchmark_pipeline.py --max-carbon 8 --workers 4
 ```
 
-Include memory tracking:
+Use `--include-smiles` to benchmark the fused ordinary SMILES path. For CPU
+scaling comparisons, run C8 and C9 separately with `--min-carbon` equal to
+`--max-carbon`, compare `--workers 1`, `4`, `12`, and `24`, and take the median
+of three runs per setting.
+
+Each run reports `wall_seconds`, including process pool startup/shutdown, and
+`peak_process_tree_rss_bytes`, the peak sampled sum of parent/child RSS at
+20 ms intervals. RSS counts shared pages in each process and can miss shorter
+peaks; it is not unique physical memory usage.
+
+Also include parent-process Python allocation tracking (adds profiling overhead):
 
 ```powershell
 .\.venv\Scripts\python.exe -u benchmarks\benchmark_pipeline.py --max-carbon 8 --workers 4 --trace-memory

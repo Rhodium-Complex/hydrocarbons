@@ -269,11 +269,22 @@ def _run_generation_pipeline(
     include_stereo: bool = False,
     include_tetrahedral_stereo: bool = False,
     log_step: Callable[[GenerationStepResult], None] | None = None,
+    consume_group: Callable[[FormulaSmilesGroup], None] | None = None,
 ) -> list[FormulaSmilesGroup] | None:
     """Run the shared generation loop, optionally collecting SMILES groups."""
     formula_groups = []
+
+    def emit_group(group: FormulaSmilesGroup) -> None:
+        if consume_group is None:
+            formula_groups.append(group)
+        else:
+            consume_group(group)
+            # The upstream structure-step generator also references this list.
+            # Release exported variants before requesting the next formula.
+            group.variants.clear()
+
     if include_smiles and include_methane:
-        formula_groups.append(
+        emit_group(
             FormulaSmilesGroup(
                 label=format_formula_label(1, 4),
                 carbon_count=1,
@@ -317,7 +328,7 @@ def _run_generation_pipeline(
 
             if include_smiles:
                 output_count = len(outputs)
-                formula_groups.append(
+                emit_group(
                     FormulaSmilesGroup(
                         label=format_formula_label(
                             step.carbon_count,
@@ -407,4 +418,32 @@ def run_export_smiles_groups(
         include_stereo=include_stereo,
         include_tetrahedral_stereo=include_tetrahedral_stereo,
         log_step=print_step_result,
+    )
+
+
+def stream_export_smiles_groups(
+    min_carbon: int,
+    max_carbon: int,
+    consume_group: Callable[[FormulaSmilesGroup], None],
+    workers: int | None = None,
+    include_stereo: bool = False,
+    include_tetrahedral_stereo: bool = False,
+    log_step: Callable[[GenerationStepResult], None] | None = None,
+) -> None:
+    """Consume each formula synchronously, then clear its variants list.
+
+    The consumer may retain individual variants (e.g. an unfinished SVG page),
+    but must not retain the borrowed group/list itself. Structures needed for
+    the next dehydrogenation remain in the generation pipeline.
+    """
+    _run_generation_pipeline(
+        min_carbon=min_carbon,
+        max_carbon=max_carbon,
+        workers=workers,
+        include_smiles=True,
+        include_methane=True,
+        include_stereo=include_stereo,
+        include_tetrahedral_stereo=include_tetrahedral_stereo,
+        log_step=print_step_result if log_step is None else log_step,
+        consume_group=consume_group,
     )

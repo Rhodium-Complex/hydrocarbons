@@ -23,6 +23,8 @@ Useful options:
 - `--max-carbon`: last carbon count to generate.
 - `--workers`: number of worker processes in the shared generation pool;
   `1` runs sequentially. Ordinary SMILES conversion runs in the same tasks.
+- `--svg-workers`: SVG page-rendering processes, separate from generation
+  workers; defaults to `1` (sequential rendering).
 - `--no-smiles`: skip SMILES conversion and report structure counts only.
 - `--include-stereo`: expand formal E/Z stereoisomers during final SMILES output.
 - `--include-tetrahedral-stereo`: expand tetrahedral-carbon and allene-like
@@ -62,6 +64,40 @@ Export editable B5 SVG pages:
 ```powershell
 .\.venv\Scripts\python.exe -u main.py --max-carbon 8 --workers 4 --export svg
 ```
+
+SVG export writes full pages as each molecular formula (carbon/hydrogen count)
+is generated, instead of collecting all formulas first. A page contains 400
+cells, including formula headings. An unfinished page carries over to the next
+formula; the last partial page is written when generation finishes. The terminal
+shows a single SVG progress bar (completed / submitted pages). It is cleared
+when the submitted pages finish, before each formula timing line, and when the
+export exits. The denominator is pages submitted so far, not a forecast of the
+entire enumeration. Redirected output contains no progress bar or per-file logs.
+
+If RDKit raises a drawing/coordinate error such as
+`Cannot normalize a zero length vector`, export continues with the next cell.
+The failed cell shows its SMILES and `draw failed`; its SVG `<desc>` retains the
+full SMILES and error message. Drawing warnings still report the page, row,
+column and formula. Disk-write errors and worker-process failures still stop
+the export.
+
+To render multiple SVG pages concurrently:
+
+```powershell
+.\.venv\Scripts\python.exe -u main.py --max-carbon 10 --workers 12 --export svg --svg-workers 4
+```
+
+SVG workers render and save separate pages while generation can continue.
+At most `2 * svg_workers` pages are submitted but not yet collected; generation
+waits when that limit is reached. Page numbers and returned file order remain
+stable even if files finish in a different order. The SVG pool adds processes
+and memory usage alongside the generation pool, so its size is controlled
+independently. Use `--svg-workers 1` for the previous synchronous behavior.
+
+Exported SMILES lists are released after each formula. The current formula's
+output and structures needed for the next dehydrogenation still occupy memory;
+this does not put a fixed memory limit on structure generation. PDF export
+continues to collect its input before writing.
 
 By default, PDF and SVG files are written under `outputs/`, which is ignored by Git.
 Export also accepts `--include-stereo`, `--output`, and `--output-prefix`.

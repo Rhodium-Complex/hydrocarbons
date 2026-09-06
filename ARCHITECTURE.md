@@ -19,10 +19,14 @@ python main.py
 
 ```text
 main(...)
-  --export pdf/svg の場合:
+  --export pdf の場合:
     -> generation_pipeline.run_export_smiles_groups(...)
     -> export_structures_pdf.export_formula_smiles_pdf(...)
-       または export_structures_svg.export_formula_smiles_svg_pages(...)
+
+  --export svg の場合:
+    -> generation_pipeline.stream_export_smiles_groups(...)
+       -> 分子式ごとに SvgPageWriter.add_group(...)
+    -> SvgPageWriter.finish()
 
   include_smiles=True の場合:
     -> generation_pipeline.run_generation_smiles_groups(...)
@@ -193,12 +197,31 @@ SVG 出力:
 
 ```text
 main(..., export_format="svg")
-  -> generation_pipeline.run_export_smiles_groups(...)
-  -> export_structures_svg.export_formula_smiles_svg_pages(...)
-     -> structure_export_layout.build_structure_cells(...)
-     -> RDKit で SMILES を分子図に変換
-     -> SVG ページを出力
+  -> generation_pipeline.stream_export_smiles_groups(...)
+     -> 分子式ごとに SvgPageWriter.add_group(...)
+        -> 400セルたまるごとに _write_svg_page(...)
+           -> RDKit で SMILES を分子図に変換し、SVG ページを保存
+  -> SvgPageWriter.finish()  [最後の端数ページを保存]
 ```
+
+SVGは全分子式の出力を蓄積しません。コールバックが分子式を消費した後、
+パイプラインはその `variants` リストをクリアします。出力側は未完成の1ページ分の
+セルだけを持ち越し、分子式の見出しや構造の順番、警告のページ・行・列を維持します。
+次の脱水素に必要な構造と、処理中の1分子式のSMILESは引き続きメモリ上に保持します。
+
+`--svg-workers`（既定値1）を2以上にすると、SVG専用のプロセスプールでページ単位に
+描画・保存します。ワーカーは `spawn` で起動してRDKitを各プロセスで初期化します。
+未回収ページはSVGワーカー数×2以下に制限し、満杯なら生成側を待たせます。
+未完成ページとこの上限内の投入済みページを保持し、結果はページ番号順に回収します。
+`finish()` は残りのページの完了を待ちます。生成・描画中の例外でもコンテキスト管理で
+未開始タスクをキャンセルし、プールを終了します。
+
+SVG描画中の `RuntimeError` / `ValueError` はセル単位で処理し、SMILESと
+`draw failed` を代替表示して後続セルを描画します。SVGの `<desc>` に元のSMILESと
+例外メッセージを残します。ファイル書き込みやプロセス障害は引き続き伝播します。
+`SvgPageWriter` の `on_progress(completed, submitted)` を `SvgProgressBar` に渡し、
+ファイル名の逐次ログを廃止します。進捗は端末でのみ表示し、完了・終了時と
+分子式のログ表示前に行を消します。
 
 ## モジュールの役割
 
